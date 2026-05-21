@@ -1,0 +1,15 @@
+{
+  "name": "pentecostal-live",
+  "private": true,
+  "packageManager": "npm@10.0.0",
+  "workspaces": [
+    "apps/dashboard",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:dashboard": "npm --workspace apps/dashboard run dev",
+    "lint": "npm --workspace apps/dashboard run lint",
+    "typecheck": "npm --workspace apps/dashboard run typecheck"
+  }
+}
+
