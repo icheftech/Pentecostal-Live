@@ -1,14 +1,11 @@
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import models
 from app.core.config import get_settings
-from app.db import engine
 from app.routers import auth, organizations, platform_keys, streams
 
 
 settings = get_settings()
-models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Pentecostal Live API",
@@ -47,4 +44,3 @@ async def stream_websocket(websocket: WebSocket, stream_id: str):
         }
     )
     await websocket.close()
-

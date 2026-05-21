@@ -40,7 +40,7 @@ pentecostal-live/
 
 This repo now contains a runnable Phase 1 slice:
 
-- `apps/api`: FastAPI backend with `/v1` auth, organizations, platform keys, streams, and websocket handshake routes.
+- `apps/api`: FastAPI backend with `/v1` auth, organizations, platform keys, streams, websocket handshake routes, and Alembic-managed schema migrations.
 - `apps/dashboard`: Next.js dashboard for login/register, platform key management, stream scheduling, start/stop, and scene switching.
 - `packages/types`: Shared TypeScript API contracts used by the dashboard.
 - `packages/config`: Shared platform definitions for YouTube, Facebook, TikTok, Instagram, and PMBC website output.
@@ -69,6 +69,7 @@ cd apps/api
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 

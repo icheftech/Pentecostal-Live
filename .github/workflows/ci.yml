@@ -11,12 +11,31 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pentecostal_live_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PENTECOSTAL_LIVE_DB_URL: postgresql+psycopg://postgres:postgres@localhost:5432/pentecostal_live_test
+      PENTECOSTAL_LIVE_JWT_SECRET: ci_test_secret_not_for_production
+      PENTECOSTAL_LIVE_FERNET_KEY: t3wLwiGjnd21N2hPHC8Gk0cVLquXgVD+ZO3BkWvNlao=
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - run: alembic upgrade head
       - run: pytest
 
   dashboard:
@@ -30,4 +49,3 @@ jobs:
       - run: npm install
       - run: npm run typecheck
       - run: npm run lint
-
