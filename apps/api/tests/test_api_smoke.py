@@ -116,3 +116,63 @@ def test_viewer_cannot_create_platform_keys():
         },
     )
     assert viewer_create_response.status_code == 403
+
+
+def test_login_requires_org_selection_for_multi_org_user():
+    suffix = f"multi-org-{uuid.uuid4().hex[:8]}"
+    email = f"owner-{suffix}@example.com"
+    password = "super-secure-password"
+    first_slug = f"{suffix}-one"
+    second_slug = f"{suffix}-two"
+
+    register_response = client.post(
+        "/v1/auth/register",
+        json={
+            "organization_name": "First Church",
+            "organization_slug": first_slug,
+            "email": email,
+            "password": password,
+            "full_name": "Owner",
+        },
+    )
+    assert register_response.status_code == 201
+
+    with SessionLocal() as db:
+        user = db.scalar(select(models.User).where(models.User.email == email))
+        owner_role = db.scalar(select(models.Role).where(models.Role.name == "owner"))
+        assert user is not None
+        assert owner_role is not None
+
+        second_org = models.Organization(name="Second Church", slug=second_slug)
+        db.add(second_org)
+        db.flush()
+        db.add(
+            models.Membership(
+                organization_id=second_org.id,
+                user_id=user.id,
+                role_id=owner_role.id,
+            )
+        )
+        db.commit()
+
+    login_response = client.post(
+        "/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert login_response.status_code == 200
+    body = login_response.json()
+    assert body["access_token"] is None
+    assert body["requires_org_selection"] is True
+    assert {item["organization"]["slug"] for item in body["organizations"]} == {
+        first_slug,
+        second_slug,
+    }
+
+    selected_login_response = client.post(
+        "/v1/auth/login",
+        json={"email": email, "password": password, "org_slug": second_slug},
+    )
+    assert selected_login_response.status_code == 200
+    selected_body = selected_login_response.json()
+    assert selected_body["access_token"]
+    assert selected_body["organization"]["slug"] == second_slug

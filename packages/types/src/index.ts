@@ -14,6 +14,7 @@ export type RegisterRequest = {
 export type LoginRequest = {
   email: string;
   password: string;
+  org_slug?: string;
 };
 
 export type UserContext = {
@@ -32,6 +33,24 @@ export type Organization = {
   name: string;
   slug: string;
   plan: string;
+};
+
+export type OrgMembership = {
+  organization: Organization;
+  role: string;
+};
+
+export type LoginResponse = {
+  access_token: string | null;
+  token_type: "bearer";
+  organization?: Organization | null;
+  role?: string | null;
+  requires_org_selection: boolean;
+  organizations: OrgMembership[];
+};
+
+export type SwitchOrgRequest = {
+  org_slug: string;
 };
 
 export type PlatformKey = {
@@ -68,4 +87,3 @@ export type StreamCreate = {
   title: string;
   source: string;
 };
-

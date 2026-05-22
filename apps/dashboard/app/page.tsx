@@ -62,6 +62,10 @@ export default function DashboardPage() {
               password: String(data.get("password")),
               full_name: String(data.get("fullName") || "")
             });
+      if (!response.access_token) {
+        setMessage("Choose an organization to continue.");
+        return;
+      }
       window.localStorage.setItem(tokenStorageKey, response.access_token);
       setToken(response.access_token);
       setMessage("Signed in.");

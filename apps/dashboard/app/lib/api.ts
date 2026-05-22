@@ -1,5 +1,6 @@
 import type {
   LoginRequest,
+  LoginResponse,
   Organization,
   PlatformKey,
   PlatformKeyCreate,
@@ -36,7 +37,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
 export const api = {
   login: (payload: LoginRequest) =>
-    request<TokenResponse>("/auth/login", { method: "POST", body: JSON.stringify(payload) }),
+    request<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify(payload) }),
   register: (payload: RegisterRequest) =>
     request<TokenResponse>("/auth/register", { method: "POST", body: JSON.stringify(payload) }),
   me: (token: string) => request<UserContext>("/auth/me", {}, token),
@@ -60,4 +61,3 @@ export const api = {
   changeScene: (token: string, id: string, scene: string) =>
     request<Stream>(`/streams/${id}/scene`, { method: "POST", body: JSON.stringify({ scene }) }, token)
 };
-

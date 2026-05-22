@@ -3,6 +3,10 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -19,7 +23,40 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    # Optional — if the user belongs to multiple orgs, supply the target slug
+    org_slug: str | None = None
 
+
+class SwitchOrgRequest(BaseModel):
+    org_slug: str
+
+
+class OrgMembership(BaseModel):
+    """A single org + the user's role in that org."""
+    organization: "OrganizationOut"
+    role: str
+
+
+class LoginResponse(BaseModel):
+    """
+    Login can return one of two shapes:
+
+    1. Token minted — access_token is set, organization and role are populated.
+    2. Org selection required — access_token is None, requires_org_selection is True,
+       organizations lists all orgs the user can enter. Client should re-POST /login
+       with the chosen org_slug.
+    """
+    access_token: str | None = None
+    token_type: str = "bearer"
+    organization: "OrganizationOut | None" = None
+    role: str | None = None
+    requires_org_selection: bool = False
+    organizations: list[OrgMembership] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# User
+# ---------------------------------------------------------------------------
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -36,6 +73,10 @@ class MeResponse(BaseModel):
     role: str
 
 
+# ---------------------------------------------------------------------------
+# Organization
+# ---------------------------------------------------------------------------
+
 class OrganizationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -48,6 +89,10 @@ class OrganizationOut(BaseModel):
 class OrganizationUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=120)
 
+
+# ---------------------------------------------------------------------------
+# Platform keys
+# ---------------------------------------------------------------------------
 
 class PlatformKeyCreate(BaseModel):
     platform: str = Field(min_length=2, max_length=80)
@@ -76,6 +121,10 @@ class PlatformKeyOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
+# ---------------------------------------------------------------------------
+# Streams
+# ---------------------------------------------------------------------------
 
 class StreamCreate(BaseModel):
     title: str = Field(min_length=2, max_length=180)
@@ -108,3 +157,7 @@ class StreamMetricsOut(BaseModel):
     dropped_frames: int
     health_status: str
 
+
+# Rebuild forward refs after all models are defined
+LoginResponse.model_rebuild()
+OrgMembership.model_rebuild()

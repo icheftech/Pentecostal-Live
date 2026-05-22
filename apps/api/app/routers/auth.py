@@ -59,28 +59,143 @@ def register(payload: schemas.RegisterRequest, db: Session = Depends(get_db)) ->
         resource_id=organization.id,
     )
     db.commit()
-
     return schemas.TokenResponse(access_token=create_access_token(user.id, organization.id))
 
 
-@router.post("/login", response_model=schemas.TokenResponse)
-def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schemas.TokenResponse:
+@router.post("/login", response_model=schemas.LoginResponse)
+def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schemas.LoginResponse:
+    # 1. Verify credentials
     user = db.scalar(select(models.User).where(models.User.email == payload.email.lower()))
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
-    membership = db.scalar(select(models.Membership).where(models.Membership.user_id == user.id))
-    if membership is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User has no organization")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
 
+    # 2. Load all org memberships for this user
+    rows = db.execute(
+        select(models.Organization, models.Role)
+        .join(models.Membership, models.Membership.organization_id == models.Organization.id)
+        .join(models.Role, models.Role.id == models.Membership.role_id)
+        .where(models.Membership.user_id == user.id)
+        .order_by(models.Organization.name)
+    ).all()
+
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User has no organization membership")
+
+    # 3a. org_slug provided — find that specific org
+    if payload.org_slug:
+        match = next(
+            ((org, role) for org, role in rows if org.slug == payload.org_slug),
+            None,
+        )
+        if match is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"User is not a member of organization '{payload.org_slug}'",
+            )
+        org, role = match
+        record_audit_event(
+            db,
+            event_type="auth.logged_in",
+            organization_id=org.id,
+            actor_user_id=user.id,
+            details={"org_slug": org.slug},
+        )
+        db.commit()
+        return schemas.LoginResponse(
+            access_token=create_access_token(user.id, org.id),
+            organization=schemas.OrganizationOut.model_validate(org),
+            role=role.name,
+        )
+
+    # 3b. Single org — log straight in
+    if len(rows) == 1:
+        org, role = rows[0]
+        record_audit_event(
+            db,
+            event_type="auth.logged_in",
+            organization_id=org.id,
+            actor_user_id=user.id,
+            details={"org_slug": org.slug},
+        )
+        db.commit()
+        return schemas.LoginResponse(
+            access_token=create_access_token(user.id, org.id),
+            organization=schemas.OrganizationOut.model_validate(org),
+            role=role.name,
+        )
+
+    # 3c. Multiple orgs — return org list, no token yet; client must re-submit with org_slug
+    return schemas.LoginResponse(
+        access_token=None,
+        requires_org_selection=True,
+        organizations=[
+            schemas.OrgMembership(
+                organization=schemas.OrganizationOut.model_validate(org),
+                role=role.name,
+            )
+            for org, role in rows
+        ],
+    )
+
+
+@router.get("/orgs", response_model=list[schemas.OrgMembership])
+def list_my_orgs(context: CurrentContext = Depends(get_current_context), db: Session = Depends(get_db)):
+    """Return all orgs the authenticated user belongs to — used by the org switcher."""
+    rows = db.execute(
+        select(models.Organization, models.Role)
+        .join(models.Membership, models.Membership.organization_id == models.Organization.id)
+        .join(models.Role, models.Role.id == models.Membership.role_id)
+        .where(models.Membership.user_id == context.user.id)
+        .order_by(models.Organization.name)
+    ).all()
+
+    return [
+        schemas.OrgMembership(
+            organization=schemas.OrganizationOut.model_validate(org),
+            role=role.name,
+        )
+        for org, role in rows
+    ]
+
+
+@router.post("/switch-org", response_model=schemas.LoginResponse)
+def switch_org(
+    payload: schemas.SwitchOrgRequest,
+    context: CurrentContext = Depends(get_current_context),
+    db: Session = Depends(get_db),
+):
+    """Mint a new token for a different org the user already belongs to."""
+    row = db.execute(
+        select(models.Organization, models.Role)
+        .join(models.Membership, models.Membership.organization_id == models.Organization.id)
+        .join(models.Role, models.Role.id == models.Membership.role_id)
+        .where(models.Membership.user_id == context.user.id)
+        .where(models.Organization.slug == payload.org_slug)
+    ).first()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"User is not a member of organization '{payload.org_slug}'",
+        )
+
+    org, role = row
     record_audit_event(
         db,
-        event_type="auth.logged_in",
-        organization_id=membership.organization_id,
-        actor_user_id=user.id,
+        event_type="auth.org_switched",
+        organization_id=org.id,
+        actor_user_id=context.user.id,
+        details={"from_org": context.organization.slug, "to_org": org.slug},
     )
     db.commit()
-    return schemas.TokenResponse(access_token=create_access_token(user.id, membership.organization_id))
+    return schemas.LoginResponse(
+        access_token=create_access_token(context.user.id, org.id),
+        organization=schemas.OrganizationOut.model_validate(org),
+        role=role.name,
+    )
 
 
 @router.get("/me", response_model=schemas.MeResponse)
@@ -90,4 +205,3 @@ def me(context: CurrentContext = Depends(get_current_context)) -> schemas.MeResp
         organization_id=context.organization.id,
         role=context.role.name,
     )
-
