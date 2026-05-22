@@ -1,7 +1,11 @@
 import uuid
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from app import models
+from app.core.security import create_access_token, hash_password
+from app.db import SessionLocal
 from app.main import app
 
 
@@ -42,3 +46,73 @@ def test_platform_keys_are_masked():
     body = create_response.json()
     assert body["masked_stream_key"] == "********9999"
     assert "abcd-efgh" not in str(body)
+
+
+def test_viewer_cannot_create_platform_keys():
+    suffix = f"rbac-{uuid.uuid4().hex[:8]}"
+    register_response = client.post(
+        "/v1/auth/register",
+        json={
+            "organization_name": "RBAC Test Church",
+            "organization_slug": suffix,
+            "email": f"owner-{suffix}@example.com",
+            "password": "super-secure-password",
+            "full_name": "Owner",
+        },
+    )
+    assert register_response.status_code == 201
+    owner_token = register_response.json()["access_token"]
+
+    with SessionLocal() as db:
+        organization = db.scalar(
+            select(models.Organization).where(models.Organization.slug == suffix)
+        )
+        viewer_role = db.scalar(select(models.Role).where(models.Role.name == "viewer"))
+        assert organization is not None
+        assert viewer_role is not None
+
+        viewer = models.User(
+            email=f"viewer-{suffix}@example.com",
+            full_name="Viewer",
+            password_hash=hash_password("super-secure-password"),
+        )
+        db.add(viewer)
+        db.flush()
+        db.add(
+            models.Membership(
+                organization_id=organization.id,
+                user_id=viewer.id,
+                role_id=viewer_role.id,
+            )
+        )
+        db.commit()
+        viewer_token = create_access_token(viewer.id, organization.id)
+
+    owner_create_response = client.post(
+        "/v1/platform-keys",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "platform": "facebook",
+            "display_name": "Main Facebook",
+            "stream_key": "abcd-efgh-ijkl-2222",
+        },
+    )
+    assert owner_create_response.status_code == 201
+
+    list_response = client.get(
+        "/v1/platform-keys",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["masked_stream_key"] == "********2222"
+
+    viewer_create_response = client.post(
+        "/v1/platform-keys",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+        json={
+            "platform": "youtube",
+            "display_name": "Viewer YouTube",
+            "stream_key": "abcd-efgh-ijkl-3333",
+        },
+    )
+    assert viewer_create_response.status_code == 403

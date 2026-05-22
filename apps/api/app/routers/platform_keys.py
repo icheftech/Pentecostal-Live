@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.audit import record_audit_event
+from app.core.roles import require_roles
 from app.core.security import encrypt_stream_key, mask_stream_key
 from app.db import get_db
 from app.deps import CurrentContext, get_current_context
@@ -38,6 +39,7 @@ def get_platform_key_or_404(db: Session, key_id: str, organization_id: str) -> m
     return platform_key
 
 
+# Any authenticated org member can list keys (keys are always masked)
 @router.get("", response_model=list[schemas.PlatformKeyOut])
 def list_platform_keys(
     context: CurrentContext = Depends(get_current_context),
@@ -51,10 +53,12 @@ def list_platform_keys(
     return [to_platform_key_out(platform_key) for platform_key in platform_keys]
 
 
+# Only owner/admin can add new platform keys
 @router.post("", response_model=schemas.PlatformKeyOut, status_code=status.HTTP_201_CREATED)
 def create_platform_key(
     payload: schemas.PlatformKeyCreate,
     context: CurrentContext = Depends(get_current_context),
+    _: None = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     platform = payload.platform.lower()
@@ -89,11 +93,13 @@ def create_platform_key(
     return to_platform_key_out(platform_key)
 
 
+# Only owner/admin can update key metadata (display name, active status)
 @router.patch("/{platform_key_id}", response_model=schemas.PlatformKeyOut)
 def update_platform_key(
     platform_key_id: str,
     payload: schemas.PlatformKeyUpdate,
     context: CurrentContext = Depends(get_current_context),
+    _: None = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     platform_key = get_platform_key_or_404(db, platform_key_id, context.organization.id)
@@ -114,10 +120,12 @@ def update_platform_key(
     return to_platform_key_out(platform_key)
 
 
+# Only owner can permanently delete a key
 @router.delete("/{platform_key_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_platform_key(
     platform_key_id: str,
     context: CurrentContext = Depends(get_current_context),
+    _: None = Depends(require_roles("owner")),
     db: Session = Depends(get_db),
 ):
     platform_key = get_platform_key_or_404(db, platform_key_id, context.organization.id)
@@ -133,11 +141,13 @@ def delete_platform_key(
     db.commit()
 
 
+# Owner/admin can rotate keys
 @router.post("/{platform_key_id}/rotate", response_model=schemas.PlatformKeyOut)
 def rotate_platform_key(
     platform_key_id: str,
     payload: schemas.PlatformKeyRotate,
     context: CurrentContext = Depends(get_current_context),
+    _: None = Depends(require_roles("owner", "admin")),
     db: Session = Depends(get_db),
 ):
     platform_key = get_platform_key_or_404(db, platform_key_id, context.organization.id)
@@ -157,10 +167,12 @@ def rotate_platform_key(
     return to_platform_key_out(platform_key)
 
 
+# Owner/admin/producer can test connectivity (they need to verify before going live)
 @router.post("/{platform_key_id}/test")
 def test_platform_key(
     platform_key_id: str,
     context: CurrentContext = Depends(get_current_context),
+    _: None = Depends(require_roles("owner", "admin", "producer")),
     db: Session = Depends(get_db),
 ):
     platform_key = get_platform_key_or_404(db, platform_key_id, context.organization.id)
@@ -169,4 +181,3 @@ def test_platform_key(
         "platform": platform_key.platform,
         "status": "configured" if platform_key.is_active else "inactive",
     }
-

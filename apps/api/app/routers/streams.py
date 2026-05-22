@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.audit import record_audit_event
+from app.core.roles import require_roles
 from app.db import get_db
 from app.deps import CurrentContext, get_current_context
 
@@ -24,6 +25,7 @@ def get_stream_or_404(db: Session, stream_id: str, organization_id: str) -> mode
     return stream
 
 
+# Any authenticated org member can view streams
 @router.get("", response_model=list[schemas.StreamOut])
 def list_streams(
     context: CurrentContext = Depends(get_current_context),
@@ -36,10 +38,12 @@ def list_streams(
     ).all()
 
 
+# Owner/admin/producer can create a stream
 @router.post("", response_model=schemas.StreamOut, status_code=status.HTTP_201_CREATED)
 def create_stream(
     payload: schemas.StreamCreate,
     context: CurrentContext = Depends(get_current_context),
+    _: None = Depends(require_roles("owner", "admin", "producer")),
     db: Session = Depends(get_db),
 ):
     stream = models.Stream(
@@ -63,10 +67,12 @@ def create_stream(
     return stream
 
 
+# Owner/admin/producer can go live
 @router.post("/{stream_id}/start", response_model=schemas.StreamOut)
 def start_stream(
     stream_id: str,
     context: CurrentContext = Depends(get_current_context),
+    _: None = Depends(require_roles("owner", "admin", "producer")),
     db: Session = Depends(get_db),
 ):
     stream = get_stream_or_404(db, stream_id, context.organization.id)
@@ -86,10 +92,12 @@ def start_stream(
     return stream
 
 
+# Owner/admin/producer can end the stream
 @router.post("/{stream_id}/stop", response_model=schemas.StreamOut)
 def stop_stream(
     stream_id: str,
     context: CurrentContext = Depends(get_current_context),
+    _: None = Depends(require_roles("owner", "admin", "producer")),
     db: Session = Depends(get_db),
 ):
     stream = get_stream_or_404(db, stream_id, context.organization.id)
@@ -108,11 +116,13 @@ def stop_stream(
     return stream
 
 
+# Owner/admin/producer can switch scenes
 @router.post("/{stream_id}/scene", response_model=schemas.StreamOut)
 def change_scene(
     stream_id: str,
     payload: schemas.StreamSceneRequest,
     context: CurrentContext = Depends(get_current_context),
+    _: None = Depends(require_roles("owner", "admin", "producer")),
     db: Session = Depends(get_db),
 ):
     stream = get_stream_or_404(db, stream_id, context.organization.id)
@@ -131,6 +141,7 @@ def change_scene(
     return stream
 
 
+# Any authenticated org member can view metrics
 @router.get("/{stream_id}/metrics", response_model=schemas.StreamMetricsOut)
 def get_metrics(
     stream_id: str,
@@ -145,4 +156,3 @@ def get_metrics(
         dropped_frames=0,
         health_status="excellent" if stream.status == "live" else "offline",
     )
-
