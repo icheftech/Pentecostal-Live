@@ -53,6 +53,33 @@ export type SwitchOrgRequest = {
   org_slug: string;
 };
 
+export type Member = {
+  user_id: string;
+  email: string;
+  full_name: string | null;
+  role: string;
+  joined_at: string;
+};
+
+export type MemberInviteRequest = {
+  email: string;
+  role: string;
+};
+
+export type MemberInviteResponse = {
+  status: "member_added" | "invitation_created";
+  email: string;
+  role: string;
+  invite_token: string | null;
+  expires_at: string | null;
+};
+
+export type AcceptInviteRequest = {
+  token: string;
+  password: string;
+  full_name?: string;
+};
+
 export type PlatformKey = {
   id: string;
   platform: string;

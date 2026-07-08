@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.routers import auth, organizations, platform_keys, streams
+from app.routers import auth, members, organizations, platform_keys, streams
 
 
 settings = get_settings()
@@ -23,6 +23,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/v1")
+app.include_router(members.router, prefix="/v1")
 app.include_router(organizations.router, prefix="/v1")
 app.include_router(platform_keys.router, prefix="/v1")
 app.include_router(streams.router, prefix="/v1")

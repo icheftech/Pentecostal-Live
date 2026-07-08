@@ -31,6 +31,12 @@ class SwitchOrgRequest(BaseModel):
     org_slug: str
 
 
+class AcceptInviteRequest(BaseModel):
+    token: str = Field(min_length=10)
+    password: str = Field(min_length=10)
+    full_name: str | None = None
+
+
 class OrgMembership(BaseModel):
     """A single org + the user's role in that org."""
     organization: "OrganizationOut"
@@ -88,6 +94,43 @@ class OrganizationOut(BaseModel):
 
 class OrganizationUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=120)
+
+
+# ---------------------------------------------------------------------------
+# Members
+# ---------------------------------------------------------------------------
+
+class MemberOut(BaseModel):
+    user_id: str
+    email: EmailStr
+    full_name: str | None
+    role: str
+    joined_at: datetime
+
+
+class MemberInviteRequest(BaseModel):
+    email: EmailStr
+    role: str = Field(min_length=2, max_length=60)
+
+
+class MemberInviteResponse(BaseModel):
+    """
+    Two outcomes:
+
+    1. status="member_added" — the invited email already had an account, so the
+       membership was created immediately. invite_token is None.
+    2. status="invitation_created" — an Invitation row was created and
+       invite_token holds the one-time token the admin shares with the invitee.
+    """
+    status: str
+    email: EmailStr
+    role: str
+    invite_token: str | None = None
+    expires_at: datetime | None = None
+
+
+class MemberRoleUpdate(BaseModel):
+    role: str = Field(min_length=2, max_length=60)
 
 
 # ---------------------------------------------------------------------------

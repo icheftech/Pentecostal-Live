@@ -67,6 +67,22 @@ class Membership(Base):
     role: Mapped[Role] = relationship()
 
 
+class Invitation(Base):
+    __tablename__ = "invitations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    email: Mapped[str] = mapped_column(String(320), index=True, nullable=False)
+    role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"))
+    token: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    organization: Mapped[Organization] = relationship()
+    role: Mapped[Role] = relationship()
+
+
 class PlatformKey(Base, TimestampMixin):
     __tablename__ = "platform_keys"
     __table_args__ = (UniqueConstraint("organization_id", "platform", name="uq_platform_key_org_platform"),)
