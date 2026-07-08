@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -139,6 +141,65 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schem
             for org, role in rows
         ],
     )
+
+
+@router.post("/accept-invite", response_model=schemas.TokenResponse, status_code=status.HTTP_201_CREATED)
+def accept_invite(payload: schemas.AcceptInviteRequest, db: Session = Depends(get_db)) -> schemas.TokenResponse:
+    """
+    Redeem an invitation token (see POST /v1/members/invite): creates the user
+    account and the org membership, marks the invitation accepted, and returns
+    a login token scoped to the inviting organization. Unauthenticated — the
+    token itself is the credential.
+    """
+    invitation = db.scalar(select(models.Invitation).where(models.Invitation.token == payload.token))
+    if invitation is None or invitation.accepted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation is invalid, expired, or already used",
+        )
+
+    expires_at = invitation.expires_at
+    if expires_at.tzinfo is None:  # SQLite returns naive datetimes
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if expires_at <= datetime.now(UTC):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation is invalid, expired, or already used",
+        )
+
+    existing_user = db.scalar(select(models.User).where(models.User.email == invitation.email))
+    if existing_user is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="An account with this email already exists — sign in instead",
+        )
+
+    user = models.User(
+        email=invitation.email,
+        full_name=payload.full_name,
+        password_hash=hash_password(payload.password),
+    )
+    db.add(user)
+    db.flush()
+    db.add(
+        models.Membership(
+            organization_id=invitation.organization_id,
+            user_id=user.id,
+            role_id=invitation.role_id,
+        )
+    )
+    invitation.accepted_at = datetime.now(UTC)
+    record_audit_event(
+        db,
+        event_type="auth.invite_accepted",
+        organization_id=invitation.organization_id,
+        actor_user_id=user.id,
+        resource_type="invitation",
+        resource_id=invitation.id,
+        details={"email": invitation.email},
+    )
+    db.commit()
+    return schemas.TokenResponse(access_token=create_access_token(user.id, invitation.organization_id))
 
 
 @router.get("/orgs", response_model=list[schemas.OrgMembership])
