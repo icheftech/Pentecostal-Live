@@ -1,3 +1,7 @@
+[tool.pytest.ini_options]
+# Make the app package importable regardless of how pytest is invoked.
+pythonpath = ["."]
+
 [tool.ruff]
 line-length = 120
 target-version = "py312"
