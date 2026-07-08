@@ -150,12 +150,21 @@ class StreamOut(BaseModel):
     updated_at: datetime
 
 
+class StreamDestinationStatus(BaseModel):
+    platform: str
+    status: str
+
+
 class StreamMetricsOut(BaseModel):
     stream_id: str
+    # Media-server status for the stream: "live" or "offline"
+    status: str = "offline"
     bitrate_kbps: int
     viewer_count: int
+    uptime_seconds: int = 0
     dropped_frames: int
     health_status: str
+    destinations: list[StreamDestinationStatus] = Field(default_factory=list)
 
 
 # Rebuild forward refs after all models are defined

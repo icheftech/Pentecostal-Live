@@ -23,6 +23,11 @@ class Settings(BaseSettings):
         "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173",
         alias="PENTECOSTAL_LIVE_API_CORS_ORIGINS",
     )
+    media_server_url: str = Field(
+        "http://localhost:8001",
+        alias="PENTECOSTAL_LIVE_MEDIA_SERVER_URL",
+    )
+    media_server_token: str = Field("", alias="PENTECOSTAL_LIVE_MEDIA_SERVER_TOKEN")
 
     @property
     def cors_origin_list(self) -> list[str]:

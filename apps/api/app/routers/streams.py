@@ -9,6 +9,7 @@ from app.audit import record_audit_event
 from app.core.roles import require_roles
 from app.db import get_db
 from app.deps import CurrentContext, get_current_context
+from app.services import stream_stats
 
 
 router = APIRouter(prefix="/streams", tags=["streams"])
@@ -143,16 +144,22 @@ def change_scene(
 
 # Any authenticated org member can view metrics
 @router.get("/{stream_id}/metrics", response_model=schemas.StreamMetricsOut)
-def get_metrics(
+async def get_metrics(
     stream_id: str,
     context: CurrentContext = Depends(get_current_context),
     db: Session = Depends(get_db),
 ):
     stream = get_stream_or_404(db, stream_id, context.organization.id)
+    # Real stats come from the media server; if it is unreachable this
+    # returns an "offline"/zeros fallback rather than failing the request.
+    stats = await stream_stats.fetch_stream_stats(stream.id)
     return schemas.StreamMetricsOut(
         stream_id=stream.id,
-        bitrate_kbps=5980 if stream.status == "live" else 0,
-        viewer_count=124 if stream.status == "live" else 0,
-        dropped_frames=0,
-        health_status="excellent" if stream.status == "live" else "offline",
+        status=stats["status"],
+        bitrate_kbps=stats["bitrate_kbps"],
+        viewer_count=stats.get("viewer_count", 0),
+        uptime_seconds=stats["uptime_seconds"],
+        dropped_frames=stats["dropped_frames"],
+        health_status=stream_stats.derive_health(stats),
+        destinations=stats["destinations"],
     )
