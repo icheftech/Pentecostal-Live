@@ -11,3 +11,6 @@ coverage/
 *.db
 *.tsbuildinfo
 .DS_Store
+.hls-test-output/
+data/hls/
+*.egg-info/
