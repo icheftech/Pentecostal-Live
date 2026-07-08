@@ -14,7 +14,10 @@ class Settings(BaseSettings):
     )
     jwt_secret: str = Field("change_me_before_real_use", alias="PENTECOSTAL_LIVE_JWT_SECRET")
     jwt_algorithm: str = "HS256"
-    access_token_minutes: int = 60 * 12
+    access_token_minutes: int = Field(30, alias="PENTECOSTAL_LIVE_ACCESS_TOKEN_MINUTES")
+    refresh_token_days: int = Field(30, alias="PENTECOSTAL_LIVE_REFRESH_TOKEN_DAYS")
+    rate_limit_enabled: bool = Field(True, alias="PENTECOSTAL_LIVE_RATE_LIMIT_ENABLED")
+    auth_rate_limit: str = Field("5/minute", alias="PENTECOSTAL_LIVE_AUTH_RATE_LIMIT")
     fernet_key: str = Field(
         "t3wLwiGjnd21N2hPHC8Gk0cVLquXgVD+ZO3BkWvNlao=",
         alias="PENTECOSTAL_LIVE_FERNET_KEY",

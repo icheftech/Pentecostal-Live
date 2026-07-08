@@ -1,12 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.audit import record_audit_event
+from app.core.config import get_settings
+from app.core.limiter import limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db import get_db
 from app.deps import CurrentContext, get_current_context
+from app.token_store import issue_refresh_token
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -34,7 +37,12 @@ def ensure_roles(db: Session) -> models.Role:
 
 
 @router.post("/register", response_model=schemas.TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: schemas.RegisterRequest, db: Session = Depends(get_db)) -> schemas.TokenResponse:
+@limiter.limit(get_settings().auth_rate_limit)
+def register(
+    request: Request,
+    payload: schemas.RegisterRequest,
+    db: Session = Depends(get_db),
+) -> schemas.TokenResponse:
     existing_user = db.scalar(select(models.User).where(models.User.email == payload.email.lower()))
     existing_org = db.scalar(select(models.Organization).where(models.Organization.slug == payload.organization_slug))
     if existing_user or existing_org:
@@ -58,12 +66,17 @@ def register(payload: schemas.RegisterRequest, db: Session = Depends(get_db)) ->
         resource_type="organization",
         resource_id=organization.id,
     )
+    refresh_token = issue_refresh_token(db, user.id, organization.id)
     db.commit()
-    return schemas.TokenResponse(access_token=create_access_token(user.id, organization.id))
+    return schemas.TokenResponse(
+        access_token=create_access_token(user.id, organization.id),
+        refresh_token=refresh_token,
+    )
 
 
 @router.post("/login", response_model=schemas.LoginResponse)
-def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schemas.LoginResponse:
+@limiter.limit(get_settings().auth_rate_limit)
+def login(request: Request, payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schemas.LoginResponse:
     # 1. Verify credentials
     user = db.scalar(select(models.User).where(models.User.email == payload.email.lower()))
     if user is None or not verify_password(payload.password, user.password_hash):
@@ -103,9 +116,11 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schem
             actor_user_id=user.id,
             details={"org_slug": org.slug},
         )
+        refresh_token = issue_refresh_token(db, user.id, org.id)
         db.commit()
         return schemas.LoginResponse(
             access_token=create_access_token(user.id, org.id),
+            refresh_token=refresh_token,
             organization=schemas.OrganizationOut.model_validate(org),
             role=role.name,
         )
@@ -120,9 +135,11 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schem
             actor_user_id=user.id,
             details={"org_slug": org.slug},
         )
+        refresh_token = issue_refresh_token(db, user.id, org.id)
         db.commit()
         return schemas.LoginResponse(
             access_token=create_access_token(user.id, org.id),
+            refresh_token=refresh_token,
             organization=schemas.OrganizationOut.model_validate(org),
             role=role.name,
         )

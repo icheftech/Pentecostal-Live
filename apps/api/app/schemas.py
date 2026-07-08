@@ -10,6 +10,11 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    refresh_token: str | None = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 class RegisterRequest(BaseModel):
@@ -48,6 +53,7 @@ class LoginResponse(BaseModel):
     """
     access_token: str | None = None
     token_type: str = "bearer"
+    refresh_token: str | None = None
     organization: "OrganizationOut | None" = None
     role: str | None = None
     requires_org_selection: bool = False

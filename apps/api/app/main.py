@@ -1,8 +1,11 @@
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.core.config import get_settings
-from app.routers import auth, organizations, platform_keys, streams
+from app.core.limiter import limiter
+from app.routers import auth, organizations, platform_keys, streams, tokens
 
 
 settings = get_settings()
@@ -14,6 +17,9 @@ app = FastAPI(
     openapi_url="/v1/openapi.json",
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -23,6 +29,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/v1")
+app.include_router(tokens.router, prefix="/v1")
 app.include_router(organizations.router, prefix="/v1")
 app.include_router(platform_keys.router, prefix="/v1")
 app.include_router(streams.router, prefix="/v1")
