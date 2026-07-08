@@ -1,0 +1,56 @@
+# Production compose file. All secrets come from the environment (or an
+# env file passed with --env-file); compose fails loudly if any is missing.
+#
+# Required environment variables:
+#   POSTGRES_PASSWORD                  database password
+#   PENTECOSTAL_LIVE_JWT_SECRET        JWT signing secret
+#   PENTECOSTAL_LIVE_FERNET_KEY        Fernet key for stream-key encryption
+#   API_IMAGE                          e.g. ghcr.io/<owner>/pentecostal-live/api:latest
+#   DASHBOARD_IMAGE                    e.g. ghcr.io/<owner>/pentecostal-live/dashboard:latest
+# Optional:
+#   POSTGRES_DB (default pentecostal_live), POSTGRES_USER (default pentecostal)
+#   PENTECOSTAL_LIVE_API_CORS_ORIGINS  comma-separated allowed origins
+#
+# Usage: docker compose -f infra/docker/docker-compose.prod.yml up -d
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pentecostal_live}
+      POSTGRES_USER: ${POSTGRES_USER:-pentecostal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pentecostal} -d ${POSTGRES_DB:-pentecostal_live}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: ${API_IMAGE:?API_IMAGE is required (e.g. ghcr.io/<owner>/pentecostal-live/api:latest)}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PENTECOSTAL_LIVE_ENV: production
+      PENTECOSTAL_LIVE_DB_URL: postgresql+psycopg://${POSTGRES_USER:-pentecostal}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-pentecostal_live}
+      PENTECOSTAL_LIVE_JWT_SECRET: ${PENTECOSTAL_LIVE_JWT_SECRET:?PENTECOSTAL_LIVE_JWT_SECRET is required}
+      PENTECOSTAL_LIVE_FERNET_KEY: ${PENTECOSTAL_LIVE_FERNET_KEY:?PENTECOSTAL_LIVE_FERNET_KEY is required}
+      PENTECOSTAL_LIVE_API_CORS_ORIGINS: ${PENTECOSTAL_LIVE_API_CORS_ORIGINS:-}
+    ports:
+      - "8000:8000"
+
+  dashboard:
+    image: ${DASHBOARD_IMAGE:?DASHBOARD_IMAGE is required (e.g. ghcr.io/<owner>/pentecostal-live/dashboard:latest)}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:

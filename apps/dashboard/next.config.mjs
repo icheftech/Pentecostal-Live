@@ -5,6 +5,7 @@ const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "standalone",
   transpilePackages: ["@pentecostal-live/types"],
   turbopack: {
     root: join(root)

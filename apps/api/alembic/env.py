@@ -2,8 +2,10 @@ import os
 import sys
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
+
+from alembic import context
+
 
 # ---------------------------------------------------------------------------
 # Make sure the app package is importable when running `alembic` from the
@@ -11,9 +13,10 @@ from sqlalchemy import engine_from_config, pool
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import app.models  # noqa: E402, F401 — import side-effect registers all mappers
 from app.core.config import get_settings  # noqa: E402
 from app.db import Base  # noqa: E402
-import app.models  # noqa: E402, F401 — import side-effect registers all mappers
+
 
 # ---------------------------------------------------------------------------
 # Alembic Config object (gives access to alembic.ini values)
