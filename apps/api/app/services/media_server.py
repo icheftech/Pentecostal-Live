@@ -16,6 +16,7 @@ from app import models
 from app.core.config import get_settings
 from app.core.security import decrypt_stream_key
 
+
 logger = logging.getLogger("app.services.media_server")
 
 REQUEST_TIMEOUT_SECONDS = 5.0
