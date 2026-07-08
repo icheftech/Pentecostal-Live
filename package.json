@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev:dashboard": "npm --workspace apps/dashboard run dev",
+    "build": "npm --workspace apps/dashboard run build",
     "lint": "npm --workspace apps/dashboard run lint",
     "typecheck": "npm --workspace apps/dashboard run typecheck"
   }
