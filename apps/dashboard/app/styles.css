@@ -24,7 +24,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -52,12 +53,19 @@ button:disabled {
   opacity: 0.56;
 }
 
-input {
+input,
+select {
   border: 1px solid var(--line);
   border-radius: 8px;
   min-height: 42px;
   padding: 0 12px;
   width: 100%;
+}
+
+select {
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
 }
 
 label {
@@ -328,6 +336,72 @@ h2 {
   color: var(--gold);
 }
 
+.org-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.org-picker button {
+  justify-content: space-between;
+  min-height: 48px;
+}
+
+.org-switcher {
+  min-width: 170px;
+  width: auto;
+}
+
+.invite-form {
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 44px;
+}
+
+.invite-note {
+  align-items: center;
+  border: 1px dashed var(--gold);
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.invite-note div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.invite-note span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.invite-note code {
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
+.member-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.member-actions select {
+  min-height: 36px;
+  width: auto;
+}
+
+.member-actions .icon-button {
+  min-height: 36px;
+  width: 36px;
+}
+
+.danger:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
 .monitor {
   align-items: center;
   border: 1px dashed var(--line);
@@ -372,8 +446,14 @@ h2 {
   }
 
   .inline-form,
-  .panel:nth-of-type(2) .inline-form {
+  .panel:nth-of-type(2) .inline-form,
+  .invite-form {
     grid-template-columns: 1fr;
+  }
+
+  .invite-note {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .inline-form button {

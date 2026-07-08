@@ -1,7 +1,12 @@
 import type {
+  AcceptInviteRequest,
   LoginRequest,
   LoginResponse,
+  Member,
+  MemberInviteRequest,
+  MemberInviteResponse,
   Organization,
+  OrgMembership,
   PlatformKey,
   PlatformKeyCreate,
   RegisterRequest,
@@ -40,7 +45,27 @@ export const api = {
     request<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify(payload) }),
   register: (payload: RegisterRequest) =>
     request<TokenResponse>("/auth/register", { method: "POST", body: JSON.stringify(payload) }),
+  acceptInvite: (payload: AcceptInviteRequest) =>
+    request<TokenResponse>("/auth/accept-invite", { method: "POST", body: JSON.stringify(payload) }),
   me: (token: string) => request<UserContext>("/auth/me", {}, token),
+  myOrgs: (token: string) => request<OrgMembership[]>("/auth/orgs", {}, token),
+  switchOrg: (token: string, orgSlug: string) =>
+    request<LoginResponse>(
+      "/auth/switch-org",
+      { method: "POST", body: JSON.stringify({ org_slug: orgSlug }) },
+      token
+    ),
+  members: (token: string) => request<Member[]>("/members", {}, token),
+  inviteMember: (token: string, payload: MemberInviteRequest) =>
+    request<MemberInviteResponse>(
+      "/members/invite",
+      { method: "POST", body: JSON.stringify(payload) },
+      token
+    ),
+  updateMemberRole: (token: string, userId: string, role: string) =>
+    request<Member>(`/members/${userId}`, { method: "PATCH", body: JSON.stringify({ role }) }, token),
+  removeMember: (token: string, userId: string) =>
+    request<void>(`/members/${userId}`, { method: "DELETE" }, token),
   organization: (token: string) => request<Organization>("/organizations/current", {}, token),
   platformKeys: (token: string) => request<PlatformKey[]>("/platform-keys", {}, token),
   createPlatformKey: (token: string, payload: PlatformKeyCreate) =>
