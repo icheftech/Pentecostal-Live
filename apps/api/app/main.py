@@ -1,11 +1,11 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import get_settings
 from app.core.limiter import limiter
-from app.routers import auth, members, organizations, platform_keys, streams, tokens
+from app.routers import auth, members, organizations, platform_keys, streams, tokens, ws
 
 
 settings = get_settings()
@@ -34,21 +34,9 @@ app.include_router(tokens.router, prefix="/v1")
 app.include_router(organizations.router, prefix="/v1")
 app.include_router(platform_keys.router, prefix="/v1")
 app.include_router(streams.router, prefix="/v1")
+app.include_router(ws.router, prefix="/v1")
 
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "pentecostal-live-api"}
-
-
-@app.websocket("/v1/ws/streams/{stream_id}")
-async def stream_websocket(websocket: WebSocket, stream_id: str):
-    await websocket.accept()
-    await websocket.send_json(
-        {
-            "type": "connected",
-            "stream_id": stream_id,
-            "message": "Metrics transport ready for media-server integration",
-        }
-    )
-    await websocket.close()

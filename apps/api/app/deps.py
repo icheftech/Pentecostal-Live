@@ -20,19 +20,19 @@ class CurrentContext:
     role: models.Role
 
 
-def get_current_context(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
-) -> CurrentContext:
+def resolve_context_from_token(token: str, db: Session) -> CurrentContext | None:
+    """Validate a JWT and load the user/org/role it grants.
+
+    Shared by the HTTP dependency (:func:`get_current_context`) and the
+    websocket handshake, which can't use ``Depends(oauth2_scheme)``.
+    Returns ``None`` on any auth failure instead of raising.
+    """
     try:
         payload = decode_access_token(token)
         user_id = str(payload["sub"])
         organization_id = str(payload["org"])
     except (KeyError, ValueError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-        )
+        return None
 
     result = db.execute(
         select(models.User, models.Organization, models.Role)
@@ -45,11 +45,21 @@ def get_current_context(
     ).first()
 
     if result is None:
+        return None
+
+    user, organization, role = result
+    return CurrentContext(user=user, organization=organization, role=role)
+
+
+def get_current_context(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> CurrentContext:
+    context = resolve_context_from_token(token, db)
+    if context is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
         )
-
-    user, organization, role = result
-    return CurrentContext(user=user, organization=organization, role=role)
+    return context
 

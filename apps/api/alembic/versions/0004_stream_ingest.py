@@ -1,12 +1,8 @@
 """stream ingest key for media relay
 
 Revision ID: 0004_stream_ingest
-Revises: 0001_initial
+Revises: 0003_refresh_tokens
 Create Date: 2026-07-08 00:00:00.000000
-
-NOTE FOR INTEGRATOR: down_revision intentionally points at 0001_initial.
-Other agents are adding 0002/0003 in parallel; re-chain this revision's
-down_revision onto the final head when merging.
 """
 from typing import Sequence, Union
 
@@ -15,7 +11,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "0004_stream_ingest"
-down_revision: Union[str, None] = "0001_initial"
+down_revision: Union[str, None] = "0003_refresh_tokens"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
