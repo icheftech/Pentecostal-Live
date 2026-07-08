@@ -19,6 +19,19 @@ class Settings(BaseSettings):
         "t3wLwiGjnd21N2hPHC8Gk0cVLquXgVD+ZO3BkWvNlao=",
         alias="PENTECOSTAL_LIVE_FERNET_KEY",
     )
+    media_server_url: str = Field(
+        "http://localhost:8001",
+        alias="PENTECOSTAL_LIVE_MEDIA_SERVER_URL",
+    )
+    media_server_token: str = Field(
+        "change_me_media_server_token",
+        alias="PENTECOSTAL_LIVE_MEDIA_SERVER_TOKEN",
+    )
+    # RTMP base URL (nginx-rtmp ingest) that per-stream ingest keys are appended to
+    rtmp_ingest_base_url: str = Field(
+        "rtmp://localhost:1935/live",
+        alias="PENTECOSTAL_LIVE_RTMP_INGEST_BASE_URL",
+    )
     cors_origins: str = Field(
         "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173",
         alias="PENTECOSTAL_LIVE_API_CORS_ORIGINS",

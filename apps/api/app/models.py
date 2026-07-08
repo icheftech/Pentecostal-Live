@@ -93,6 +93,8 @@ class Stream(Base, TimestampMixin):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    # Per-stream RTMP ingest key, regenerated on every start (see 0004_stream_ingest)
+    ingest_key: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
 
 
 class AuditEvent(Base):
