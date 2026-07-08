@@ -199,6 +199,18 @@ class StreamOut(BaseModel):
     updated_at: datetime
 
 
+class StreamActionOut(StreamOut):
+    """Response for start/stop: stream state plus the media relay outcome.
+
+    warning is set when the media-server could not be reached or refused the
+    request — the stream state still changed; churches are never hard-blocked
+    from toggling state mid-service.
+    """
+
+    ingest_url: str | None = None
+    warning: str | None = None
+
+
 class StreamMetricsOut(BaseModel):
     stream_id: str
     bitrate_kbps: int

@@ -1,3 +1,4 @@
+import secrets
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -9,6 +10,7 @@ from app.audit import record_audit_event
 from app.core.roles import require_roles
 from app.db import get_db
 from app.deps import CurrentContext, get_current_context
+from app.services import media_server
 
 
 router = APIRouter(prefix="/streams", tags=["streams"])
@@ -68,7 +70,7 @@ def create_stream(
 
 
 # Owner/admin/producer can go live
-@router.post("/{stream_id}/start", response_model=schemas.StreamOut)
+@router.post("/{stream_id}/start", response_model=schemas.StreamActionOut)
 def start_stream(
     stream_id: str,
     context: CurrentContext = Depends(get_current_context),
@@ -79,6 +81,7 @@ def start_stream(
     stream.status = "live"
     stream.started_at = datetime.now(UTC)
     stream.ended_at = None
+    stream.ingest_key = secrets.token_urlsafe(24)  # fresh key per service
     record_audit_event(
         db,
         event_type="stream.started",
@@ -89,11 +92,27 @@ def start_stream(
     )
     db.commit()
     db.refresh(stream)
-    return stream
+    # Media relay is best-effort: never block the state change on it.
+    ingest_url, warning = media_server.start_stream_relay(db, stream)
+    if warning:
+        record_audit_event(
+            db,
+            event_type="stream.media_relay_failed",
+            organization_id=context.organization.id,
+            actor_user_id=context.user.id,
+            resource_type="stream",
+            resource_id=stream.id,
+            details={"warning": warning},
+        )
+        db.commit()
+    out = schemas.StreamActionOut.model_validate(stream)
+    out.ingest_url = ingest_url
+    out.warning = warning
+    return out
 
 
 # Owner/admin/producer can end the stream
-@router.post("/{stream_id}/stop", response_model=schemas.StreamOut)
+@router.post("/{stream_id}/stop", response_model=schemas.StreamActionOut)
 def stop_stream(
     stream_id: str,
     context: CurrentContext = Depends(get_current_context),
@@ -113,7 +132,22 @@ def stop_stream(
     )
     db.commit()
     db.refresh(stream)
-    return stream
+    # Media relay is best-effort: never block the state change on it.
+    warning = media_server.stop_stream_relay(stream)
+    if warning:
+        record_audit_event(
+            db,
+            event_type="stream.media_relay_stop_failed",
+            organization_id=context.organization.id,
+            actor_user_id=context.user.id,
+            resource_type="stream",
+            resource_id=stream.id,
+            details={"warning": warning},
+        )
+        db.commit()
+    out = schemas.StreamActionOut.model_validate(stream)
+    out.warning = warning
+    return out
 
 
 # Owner/admin/producer can switch scenes
