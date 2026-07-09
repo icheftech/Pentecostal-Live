@@ -1,5 +1,7 @@
 """Capture Studio gateway: WebSocket in, ffmpeg RTMP publish out."""
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -78,6 +80,16 @@ def key_rejected(monkeypatch):
     monkeypatch.setattr(main_module, "validate_ingest_key", never_valid)
 
 
+def wait_for(predicate, timeout=2.0):
+    """Chunk writes happen on a worker thread; poll instead of racing it."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
 def test_capture_command_transcodes_webm_to_flv():
     argv = build_capture_publish_command("rtmp://ingest:1935/live/k", ffmpeg_binary="ffmpeg")
     assert argv[argv.index("-i") + 1] == "pipe:0"
@@ -106,12 +118,15 @@ def test_capture_pipes_chunks_into_ffmpeg(key_accepted):
         assert ws.receive_json() == {"type": "capture_started", "stream_id": "stream-2"}
         ws.send_bytes(b"webm-chunk-1")
         ws.send_bytes(b"webm-chunk-2")
+        assert wait_for(
+            lambda: FakeCapturePopen.instances
+            and bytes(FakeCapturePopen.instances[0].stdin.data) == b"webm-chunk-1webm-chunk-2"
+        )
 
     assert len(FakeCapturePopen.instances) == 1
     process = FakeCapturePopen.instances[0]
     assert process.argv[-1] == "rtmp://localhost:1935/live/good-key"
-    assert bytes(process.stdin.data) == b"webm-chunk-1webm-chunk-2"
-    assert process.stdin.closed
+    assert wait_for(lambda: process.stdin.closed)
     # disconnect stops the encoder
     assert capture_manager.stop("stream-2") is False
 
@@ -120,9 +135,15 @@ def test_capture_restart_replaces_previous_encoder(key_accepted):
     with client.websocket_connect("/capture/stream-3?key=key-a") as ws:
         ws.receive_json()
         ws.send_bytes(b"first")
+        assert wait_for(
+            lambda: FakeCapturePopen.instances and bytes(FakeCapturePopen.instances[0].stdin.data) == b"first"
+        )
     with client.websocket_connect("/capture/stream-3?key=key-b") as ws:
         ws.receive_json()
         ws.send_bytes(b"second")
+        assert wait_for(
+            lambda: len(FakeCapturePopen.instances) == 2
+            and bytes(FakeCapturePopen.instances[1].stdin.data) == b"second"
+        )
 
     assert len(FakeCapturePopen.instances) == 2
-    assert bytes(FakeCapturePopen.instances[1].stdin.data) == b"second"
