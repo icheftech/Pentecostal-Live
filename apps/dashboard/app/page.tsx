@@ -15,7 +15,7 @@ import {
   Video
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import CaptureStudio from "./components/CaptureStudio";
+import Studio from "./components/Studio";
 import { api, ApiError, streamMetricsSocketUrl } from "./lib/api";
 import type {
   Member,
@@ -644,13 +644,15 @@ export default function DashboardPage() {
         <div className="panel">
           <div className="panel-title">
             <Camera size={20} />
-            <h2>Camera</h2>
+            <h2>Studio</h2>
           </div>
           {liveStream && ingestInfo && ingestInfo.streamId === liveStream.id ? (
             <>
-              <CaptureStudio
+              <Studio
                 streamId={liveStream.id}
                 ingestKey={ingestInfo.url.slice(ingestInfo.url.lastIndexOf("/") + 1)}
+                activeScene={liveStream.active_scene}
+                orgSlug={organization?.slug ?? "org"}
                 onStatus={setMessage}
               />
               <details className="encoder-details">
@@ -693,8 +695,8 @@ export default function DashboardPage() {
           ) : (
             <p className="empty">
               {liveStream
-                ? "Camera connection details are issued at stream start — stop and start the stream to reconnect a camera."
-                : "Start a stream to connect a camera."}
+                ? "Studio credentials are issued at stream start — stop and start the stream to reopen the studio."
+                : "Start a stream to open the studio."}
             </p>
           )}
         </div>

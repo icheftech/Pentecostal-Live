@@ -28,20 +28,26 @@ docker compose -f infra/docker/docker-compose.yml up --build
 That starts PostgreSQL, the API (:8000), the media-server (:8001), the
 nginx-rtmp ingest (:1935, HLS on :8080), and the dashboard (:3000).
 
-## Go live from a camera
+## Go live from the Studio
 
 1. Plug the camera (or capture device) into the machine running the browser.
 2. Open the dashboard at `http://localhost:3000`, sign in, and add your
    platform stream keys once under **Platform keys**.
 3. Create a stream under **Streams** and press **Start**. This arms the
    pipeline and issues a fresh ingest key for this service.
-4. In the **Camera** panel: **Open camera**, grant the browser permission,
-   pick the video/audio source (your HDMI/SDI capture device appears in the
-   list), and check the preview.
-5. Press **Go live from this camera**. The ON AIR badge confirms frames are
-   flowing; the **Live monitor** panel shows bitrate, uptime, dropped frames,
+4. In the **Studio** panel, build your production:
+   - **Add camera** for each camera (your HDMI/SDI capture devices appear in
+     the device list) and **Share screen** for slides, lyrics, or a class
+     presentation.
+   - Give each scene (main / sermon / worship / altar) a layout: full frame,
+     side by side, or picture in picture, and choose which source plays each
+     role. Layouts are remembered per scene.
+5. Press **Go live**. The ON AIR badge confirms frames are flowing; switching
+   the stream's scene buttons cuts the program between your layouts live —
+   camera for the sermon, slides+teacher for a class, side-by-side for
+   announcements. The **Live monitor** shows bitrate, uptime, dropped frames,
    and per-platform status.
-6. When the service ends: **Stop camera broadcast**, then **Stop** the stream.
+6. When the service ends: **Stop broadcast**, then **Stop** the stream.
 
 The website player can embed the HLS output at
 `http://<host>:8080/hls/<stream_id>/index.m3u8`.
