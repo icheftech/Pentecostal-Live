@@ -157,8 +157,9 @@ async def capture_websocket(websocket: WebSocket, stream_id: str):
         return
 
     publish_url = f"{get_settings().rtmp_publish_base_url.rstrip('/')}/{ingest_key}"
+    stabilize = websocket.query_params.get("stabilize") == "1"
     try:
-        handle = capture_manager.start(stream_id, publish_url)
+        handle = capture_manager.start(stream_id, publish_url, stabilize=stabilize)
     except FileNotFoundError:
         await websocket.close(code=1011)
         return

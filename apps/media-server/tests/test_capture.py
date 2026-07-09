@@ -96,6 +96,18 @@ def test_capture_command_transcodes_webm_to_flv():
     assert "libx264" in argv and "aac" in argv
     assert argv[argv.index("-f") + 1] == "flv"
     assert argv[-1] == "rtmp://ingest:1935/live/k"
+    assert "-vf" not in argv
+
+
+def test_capture_command_stabilize_adds_deshake():
+    argv = build_capture_publish_command("rtmp://ingest:1935/live/k", stabilize=True)
+    assert argv[argv.index("-vf") + 1] == "deshake"
+
+
+def test_capture_stabilize_flag_reaches_ffmpeg(key_accepted):
+    with client.websocket_connect("/capture/stream-4?key=good-key&stabilize=1") as ws:
+        ws.receive_json()
+    assert "deshake" in FakeCapturePopen.instances[0].argv
 
 
 def test_capture_rejects_invalid_key(key_rejected):

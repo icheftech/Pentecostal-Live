@@ -104,21 +104,29 @@ def build_capture_publish_command(
     ffmpeg_binary: str = "ffmpeg",
     video_bitrate_kbps: int = 4500,
     audio_bitrate_kbps: int = 160,
+    stabilize: bool = False,
 ) -> list[str]:
     """Build the FFmpeg argv for the browser Capture Studio gateway.
 
     Reads a WebM byte stream (MediaRecorder output) from stdin, transcodes to
     H.264/AAC — platforms will not take VP8/VP9 over RTMP — and publishes to
     the ingest, where the normal relay fan-out picks it up.
+
+    stabilize=True inserts ffmpeg's single-pass ``deshake`` filter — the
+    Studio's built-in image stabilization, done server-side where the CPU is.
     """
     if not publish_url:
         raise ValueError("publish_url is required")
+
+    video_filters = ["deshake"] if stabilize else []
+    filter_args = ["-vf", ",".join(video_filters)] if video_filters else []
 
     return [
         ffmpeg_binary,
         "-hide_banner",
         "-loglevel", "warning",
         "-i", "pipe:0",
+        *filter_args,
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-tune", "zerolatency",

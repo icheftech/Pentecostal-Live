@@ -42,10 +42,12 @@ class CaptureManager:
         self._captures: dict[str, CaptureHandle] = {}
         self._lock = threading.Lock()
 
-    def start(self, stream_id: str, publish_url: str) -> CaptureHandle:
+    def start(self, stream_id: str, publish_url: str, stabilize: bool = False) -> CaptureHandle:
         """Start (or idempotently restart) the capture encoder for a stream."""
         self.stop(stream_id)
-        argv = build_capture_publish_command(publish_url, ffmpeg_binary=self._ffmpeg_binary)
+        argv = build_capture_publish_command(
+            publish_url, ffmpeg_binary=self._ffmpeg_binary, stabilize=stabilize
+        )
         logger.info("starting capture encoder for stream %s", stream_id)
         process = subprocess.Popen(  # noqa: S603 - argv list, never a shell string
             argv,

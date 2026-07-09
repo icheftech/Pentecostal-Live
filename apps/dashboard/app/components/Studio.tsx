@@ -1,8 +1,17 @@
 "use client";
 
-import { Camera, CircleDot, MonitorUp, Square, X } from "lucide-react";
+import { Camera, CircleDot, MonitorUp, SlidersHorizontal, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { captureSocketUrl } from "../lib/api";
+import {
+  applyAudioSettings,
+  closeAudioChain,
+  connectAudioInput,
+  createAudioChain,
+  defaultAudioSettings,
+  type AudioChain,
+  type AudioPluginSettings
+} from "../lib/audioChain";
 
 type Props = {
   streamId: string;
@@ -29,6 +38,10 @@ type SceneLayout = {
   primary: string | null; // source id; null = first available
   secondary: string | null;
 };
+
+type VideoFilterSettings = { brightness: number; contrast: number; saturate: number };
+
+const NEUTRAL_VIDEO_FILTER: VideoFilterSettings = { brightness: 100, contrast: 100, saturate: 100 };
 
 const LAYOUT_LABELS: Record<LayoutType, string> = {
   single: "Full frame",
@@ -99,6 +112,10 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
   const [audioDeviceId, setAudioDeviceId] = useState("");
   const [layouts, setLayouts] = useState<Record<string, SceneLayout>>({});
   const [broadcasting, setBroadcasting] = useState(false);
+  const [audioSettings, setAudioSettings] = useState<AudioPluginSettings>(defaultAudioSettings);
+  const [stabilize, setStabilize] = useState(false);
+  const [videoFilters, setVideoFilters] = useState<Record<string, VideoFilterSettings>>({});
+  const [filterSourceId, setFilterSourceId] = useState("");
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sourcesRef = useRef<StudioSource[]>([]);
@@ -108,6 +125,8 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
   const drawTimerRef = useRef<number | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const audioChainRef = useRef<AudioChain | null>(null);
+  const videoFiltersRef = useRef<Record<string, VideoFilterSettings>>({});
 
   const sourceSequenceRef = useRef(0);
 
@@ -117,7 +136,40 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
     activeSceneRef.current = activeScene;
   }, [sources, layouts, activeScene]);
 
+  useEffect(() => {
+    videoFiltersRef.current = videoFilters;
+  }, [videoFilters]);
+
+  // Push plugin changes into the live audio nodes.
+  useEffect(() => {
+    if (audioChainRef.current) applyAudioSettings(audioChainRef.current, audioSettings);
+  }, [audioSettings]);
+
   const layoutStorageKey = `pentecostal_live_layouts_${orgSlug}`;
+  const pluginStorageKey = `pentecostal_live_plugins_${orgSlug}`;
+
+  // Restore saved plugin settings once.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(pluginStorageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved) as { audio?: AudioPluginSettings; stabilize?: boolean };
+        if (parsed.audio) setAudioSettings(parsed.audio);
+        if (typeof parsed.stabilize === "boolean") setStabilize(parsed.stabilize);
+      }
+    } catch {
+      // corrupted saved plugins: start fresh
+    }
+  }, [pluginStorageKey]);
+
+  // Persist plugin settings.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(pluginStorageKey, JSON.stringify({ audio: audioSettings, stabilize }));
+    } catch {
+      // storage full/blocked: plugins just won't persist
+    }
+  }, [pluginStorageKey, audioSettings, stabilize]);
 
   // Restore saved per-scene layouts once.
   useEffect(() => {
@@ -165,6 +217,11 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
     const primary = resolveSource(layout.primary, 0);
     const secondary = resolveSource(layout.secondary, 1);
 
+    const filterFor = (sourceId: string) => {
+      const f = videoFiltersRef.current[sourceId];
+      return f ? `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturate}%)` : "none";
+    };
+
     if (!primary) {
       ctx.fillStyle = "#8b96a5";
       ctx.font = "600 28px Inter, system-ui, sans-serif";
@@ -174,12 +231,17 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
     }
 
     if (layout.type === "side-by-side" && secondary && secondary.id !== primary.id) {
+      ctx.filter = filterFor(primary.id);
       drawCover(ctx, primary.video, 0, 0, PROGRAM_WIDTH / 2, PROGRAM_HEIGHT);
+      ctx.filter = filterFor(secondary.id);
       drawCover(ctx, secondary.video, PROGRAM_WIDTH / 2, 0, PROGRAM_WIDTH / 2, PROGRAM_HEIGHT);
+      ctx.filter = "none";
       ctx.fillStyle = "#0b0f16";
       ctx.fillRect(PROGRAM_WIDTH / 2 - 2, 0, 4, PROGRAM_HEIGHT);
     } else if (layout.type === "pip" && secondary && secondary.id !== primary.id) {
+      ctx.filter = filterFor(primary.id);
       drawCover(ctx, primary.video, 0, 0, PROGRAM_WIDTH, PROGRAM_HEIGHT);
+      ctx.filter = "none";
       const pipWidth = PROGRAM_WIDTH * 0.28;
       const pipHeight = (pipWidth * 9) / 16;
       const margin = 20;
@@ -187,9 +249,13 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
       const y = PROGRAM_HEIGHT - pipHeight - margin;
       ctx.fillStyle = "#f8fafc";
       ctx.fillRect(x - 3, y - 3, pipWidth + 6, pipHeight + 6);
+      ctx.filter = filterFor(secondary.id);
       drawCover(ctx, secondary.video, x, y, pipWidth, pipHeight);
+      ctx.filter = "none";
     } else {
+      ctx.filter = filterFor(primary.id);
       drawCover(ctx, primary.video, 0, 0, PROGRAM_WIDTH, PROGRAM_HEIGHT);
+      ctx.filter = "none";
     }
   }, []);
 
@@ -219,6 +285,10 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
     sourcesRef.current.forEach((source) => source.stream.getTracks().forEach((track) => track.stop()));
     audioStreamRef.current?.getTracks().forEach((track) => track.stop());
     audioStreamRef.current = null;
+    if (audioChainRef.current) {
+      closeAudioChain(audioChainRef.current);
+      audioChainRef.current = null;
+    }
     setSources([]);
   }, [stopBroadcast]);
 
@@ -232,10 +302,16 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
   }
 
   async function ensureAudio() {
+    if (!audioChainRef.current) {
+      audioChainRef.current = createAudioChain();
+      applyAudioSettings(audioChainRef.current, audioSettings);
+    }
+    await audioChainRef.current.context.resume().catch(() => undefined);
     if (audioStreamRef.current) return;
     audioStreamRef.current = await navigator.mediaDevices.getUserMedia({
       audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true
     });
+    connectAudioInput(audioChainRef.current, audioStreamRef.current);
   }
 
   async function addCamera() {
@@ -299,6 +375,9 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
       audioStreamRef.current = await navigator.mediaDevices.getUserMedia({
         audio: deviceId ? { deviceId: { exact: deviceId } } : true
       });
+      if (audioChainRef.current) {
+        connectAudioInput(audioChainRef.current, audioStreamRef.current);
+      }
     } catch {
       onStatus("Could not open that microphone.");
     }
@@ -313,14 +392,19 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
       return;
     }
 
-    const socket = new WebSocket(captureSocketUrl(streamId, ingestKey));
+    const socket = new WebSocket(captureSocketUrl(streamId, ingestKey, { stabilize }));
     socketRef.current = socket;
 
     socket.onmessage = () => {
       // First frame from the gateway confirms the encoder is up — start sending.
       if (recorderRef.current) return;
       const program = canvas.captureStream(PROGRAM_FPS);
-      audioStreamRef.current?.getAudioTracks().forEach((track) => program.addTrack(track));
+      // Prefer the processed (EQ/compressor/de-esser) audio; fall back to raw mic.
+      const processedTracks = audioChainRef.current?.destination.stream.getAudioTracks() ?? [];
+      const audioTracks = processedTracks.length
+        ? processedTracks
+        : audioStreamRef.current?.getAudioTracks() ?? [];
+      audioTracks.forEach((track) => program.addTrack(track));
       const recorder = new MediaRecorder(program, {
         mimeType,
         videoBitsPerSecond: 4_500_000,
@@ -349,6 +433,16 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
   }
 
   const hasSecondSource = sources.length > 1;
+  const colorSourceId = filterSourceId || sources[0]?.id || "";
+  const colorValues = videoFilters[colorSourceId] ?? NEUTRAL_VIDEO_FILTER;
+
+  function updateColor(patch: Partial<VideoFilterSettings>) {
+    if (!colorSourceId) return;
+    setVideoFilters((previous) => ({
+      ...previous,
+      [colorSourceId]: { ...(previous[colorSourceId] ?? NEUTRAL_VIDEO_FILTER), ...patch }
+    }));
+  }
 
   return (
     <div className="capture-studio">
@@ -472,6 +566,191 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
           Each scene remembers its layout — switch scenes on the stream to cut between them live.
         </span>
       </div>
+
+      <details className="plugin-rack">
+        <summary>
+          <SlidersHorizontal size={16} /> Audio plugins — EQ, compressor, de-esser
+        </summary>
+        <div className="plugin">
+          <label className="plugin-toggle">
+            <input
+              type="checkbox"
+              checked={audioSettings.eq.enabled}
+              onChange={(event) =>
+                setAudioSettings((previous) => ({ ...previous, eq: { ...previous.eq, enabled: event.target.checked } }))
+              }
+            />
+            3-band EQ
+          </label>
+          <div className="plugin-sliders">
+            <label>
+              Low {audioSettings.eq.low} dB
+              <input
+                type="range" min={-12} max={12} step={1} value={audioSettings.eq.low}
+                disabled={!audioSettings.eq.enabled}
+                onChange={(event) =>
+                  setAudioSettings((previous) => ({ ...previous, eq: { ...previous.eq, low: Number(event.target.value) } }))
+                }
+              />
+            </label>
+            <label>
+              Mid {audioSettings.eq.mid} dB
+              <input
+                type="range" min={-12} max={12} step={1} value={audioSettings.eq.mid}
+                disabled={!audioSettings.eq.enabled}
+                onChange={(event) =>
+                  setAudioSettings((previous) => ({ ...previous, eq: { ...previous.eq, mid: Number(event.target.value) } }))
+                }
+              />
+            </label>
+            <label>
+              High {audioSettings.eq.high} dB
+              <input
+                type="range" min={-12} max={12} step={1} value={audioSettings.eq.high}
+                disabled={!audioSettings.eq.enabled}
+                onChange={(event) =>
+                  setAudioSettings((previous) => ({ ...previous, eq: { ...previous.eq, high: Number(event.target.value) } }))
+                }
+              />
+            </label>
+          </div>
+        </div>
+        <div className="plugin">
+          <label className="plugin-toggle">
+            <input
+              type="checkbox"
+              checked={audioSettings.compressor.enabled}
+              onChange={(event) =>
+                setAudioSettings((previous) => ({
+                  ...previous,
+                  compressor: { ...previous.compressor, enabled: event.target.checked }
+                }))
+              }
+            />
+            Compressor
+          </label>
+          <div className="plugin-sliders">
+            <label>
+              Threshold {audioSettings.compressor.threshold} dB
+              <input
+                type="range" min={-60} max={0} step={1} value={audioSettings.compressor.threshold}
+                disabled={!audioSettings.compressor.enabled}
+                onChange={(event) =>
+                  setAudioSettings((previous) => ({
+                    ...previous,
+                    compressor: { ...previous.compressor, threshold: Number(event.target.value) }
+                  }))
+                }
+              />
+            </label>
+            <label>
+              Ratio {audioSettings.compressor.ratio}:1
+              <input
+                type="range" min={1} max={20} step={1} value={audioSettings.compressor.ratio}
+                disabled={!audioSettings.compressor.enabled}
+                onChange={(event) =>
+                  setAudioSettings((previous) => ({
+                    ...previous,
+                    compressor: { ...previous.compressor, ratio: Number(event.target.value) }
+                  }))
+                }
+              />
+            </label>
+          </div>
+        </div>
+        <div className="plugin">
+          <label className="plugin-toggle">
+            <input
+              type="checkbox"
+              checked={audioSettings.deEsser.enabled}
+              onChange={(event) =>
+                setAudioSettings((previous) => ({
+                  ...previous,
+                  deEsser: { ...previous.deEsser, enabled: event.target.checked }
+                }))
+              }
+            />
+            De-esser
+          </label>
+          <div className="plugin-sliders">
+            <label>
+              Amount {audioSettings.deEsser.amount} dB
+              <input
+                type="range" min={0} max={24} step={1} value={audioSettings.deEsser.amount}
+                disabled={!audioSettings.deEsser.enabled}
+                onChange={(event) =>
+                  setAudioSettings((previous) => ({
+                    ...previous,
+                    deEsser: { ...previous.deEsser, amount: Number(event.target.value) }
+                  }))
+                }
+              />
+            </label>
+          </div>
+        </div>
+        <span className="empty">Applied live to the microphone before it goes on the air.</span>
+      </details>
+
+      <details className="plugin-rack">
+        <summary>
+          <SlidersHorizontal size={16} /> Video plugins — color correction, stabilization
+        </summary>
+        {sources.length > 0 ? (
+          <div className="plugin">
+            <select
+              value={colorSourceId}
+              onChange={(event) => setFilterSourceId(event.target.value)}
+              aria-label="Source to color correct"
+            >
+              {sources.map((source) => (
+                <option key={source.id} value={source.id}>
+                  {source.label}
+                </option>
+              ))}
+            </select>
+            <div className="plugin-sliders">
+              <label>
+                Brightness {colorValues.brightness}%
+                <input
+                  type="range" min={50} max={150} step={1} value={colorValues.brightness}
+                  onChange={(event) => updateColor({ brightness: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                Contrast {colorValues.contrast}%
+                <input
+                  type="range" min={50} max={150} step={1} value={colorValues.contrast}
+                  onChange={(event) => updateColor({ contrast: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                Saturation {colorValues.saturate}%
+                <input
+                  type="range" min={0} max={200} step={1} value={colorValues.saturate}
+                  onChange={(event) => updateColor({ saturate: Number(event.target.value) })}
+                />
+              </label>
+            </div>
+            <button className="secondary" onClick={() => updateColor(NEUTRAL_VIDEO_FILTER)}>
+              Reset colors
+            </button>
+          </div>
+        ) : (
+          <span className="empty">Add a source to color correct it.</span>
+        )}
+        <div className="plugin">
+          <label className="plugin-toggle">
+            <input
+              type="checkbox"
+              checked={stabilize}
+              disabled={broadcasting}
+              onChange={(event) => setStabilize(event.target.checked)}
+            />
+            Image stabilization
+          </label>
+          <span className="empty">Processed on the server (ffmpeg deshake); takes effect at Go live.</span>
+        </div>
+      </details>
     </div>
   );
 }

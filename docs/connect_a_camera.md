@@ -42,12 +42,17 @@ nginx-rtmp ingest (:1935, HLS on :8080), and the dashboard (:3000).
    - Give each scene (main / sermon / worship / altar) a layout: full frame,
      side by side, or picture in picture, and choose which source plays each
      role. Layouts are remembered per scene.
-5. Press **Go live**. The ON AIR badge confirms frames are flowing; switching
+5. Optional polish, all built in — no external plugins:
+   - **Audio plugins**: 3-band EQ, compressor, and de-esser applied live to
+     the microphone.
+   - **Video plugins**: per-source brightness/contrast/saturation, and
+     server-side image stabilization (ffmpeg deshake, applies at Go live).
+6. Press **Go live**. The ON AIR badge confirms frames are flowing; switching
    the stream's scene buttons cuts the program between your layouts live —
    camera for the sermon, slides+teacher for a class, side-by-side for
    announcements. The **Live monitor** shows bitrate, uptime, dropped frames,
    and per-platform status.
-6. When the service ends: **Stop broadcast**, then **Stop** the stream.
+7. When the service ends: **Stop broadcast**, then **Stop** the stream.
 
 The website player can embed the HLS output at
 `http://<host>:8080/hls/<stream_id>/index.m3u8`.

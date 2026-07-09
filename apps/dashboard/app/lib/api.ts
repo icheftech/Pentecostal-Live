@@ -28,9 +28,14 @@ export function streamMetricsSocketUrl(streamId: string, token: string): string 
 const MEDIA_SERVER_URL = process.env.NEXT_PUBLIC_MEDIA_SERVER_URL ?? "http://localhost:8001";
 
 // Capture Studio gateway on the media-server; the per-start ingest key is the credential.
-export function captureSocketUrl(streamId: string, ingestKey: string): string {
+export function captureSocketUrl(
+  streamId: string,
+  ingestKey: string,
+  options?: { stabilize?: boolean }
+): string {
   const wsBase = MEDIA_SERVER_URL.replace(/^http/, "ws");
-  return `${wsBase}/capture/${streamId}?key=${encodeURIComponent(ingestKey)}`;
+  const stabilize = options?.stabilize ? "&stabilize=1" : "";
+  return `${wsBase}/capture/${streamId}?key=${encodeURIComponent(ingestKey)}${stabilize}`;
 }
 
 export class ApiError extends Error {
