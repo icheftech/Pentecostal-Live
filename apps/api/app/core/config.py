@@ -39,11 +39,16 @@ class Settings(BaseSettings):
         "change_me_media_server_token",
         alias="PENTECOSTAL_LIVE_MEDIA_SERVER_TOKEN",
     )
-    # RTMP base URL (nginx-rtmp ingest) that per-stream ingest keys are appended to
+    # RTMP base URL (nginx-rtmp ingest) that per-stream ingest keys are appended to.
+    # This is the PUBLIC address shown to producers for OBS/encoders.
     rtmp_ingest_base_url: str = Field(
         "rtmp://localhost:1935/live",
         alias="PENTECOSTAL_LIVE_RTMP_INGEST_BASE_URL",
     )
+    # Base URL the media-server uses to PULL the ingest, when it differs from
+    # the public one (e.g. rtmp://nginx-rtmp:1935/live inside Docker).
+    # Empty = same as rtmp_ingest_base_url.
+    rtmp_pull_base_url: str = Field("", alias="PENTECOSTAL_LIVE_RTMP_PULL_BASE_URL")
     cors_origins: str = Field(
         "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173",
         alias="PENTECOSTAL_LIVE_API_CORS_ORIGINS",

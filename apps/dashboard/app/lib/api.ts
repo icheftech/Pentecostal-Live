@@ -11,6 +11,7 @@ import type {
   PlatformKeyCreate,
   RegisterRequest,
   Stream,
+  StreamActionResult,
   StreamCreate,
   TokenResponse,
   UserContext
@@ -22,6 +23,14 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 export function streamMetricsSocketUrl(streamId: string, token: string): string {
   const wsBase = API_BASE_URL.replace(/^http/, "ws");
   return `${wsBase}/ws/streams/${streamId}?token=${encodeURIComponent(token)}`;
+}
+
+const MEDIA_SERVER_URL = process.env.NEXT_PUBLIC_MEDIA_SERVER_URL ?? "http://localhost:8001";
+
+// Capture Studio gateway on the media-server; the per-start ingest key is the credential.
+export function captureSocketUrl(streamId: string, ingestKey: string): string {
+  const wsBase = MEDIA_SERVER_URL.replace(/^http/, "ws");
+  return `${wsBase}/capture/${streamId}?key=${encodeURIComponent(ingestKey)}`;
 }
 
 export class ApiError extends Error {
@@ -106,9 +115,9 @@ export const api = {
   createStream: (token: string, payload: StreamCreate) =>
     request<Stream>("/streams", { method: "POST", body: JSON.stringify(payload) }, token),
   startStream: (token: string, id: string) =>
-    request<Stream>(`/streams/${id}/start`, { method: "POST" }, token),
+    request<StreamActionResult>(`/streams/${id}/start`, { method: "POST" }, token),
   stopStream: (token: string, id: string) =>
-    request<Stream>(`/streams/${id}/stop`, { method: "POST" }, token),
+    request<StreamActionResult>(`/streams/${id}/stop`, { method: "POST" }, token),
   changeScene: (token: string, id: string, scene: string) =>
     request<Stream>(`/streams/${id}/scene`, { method: "POST", body: JSON.stringify({ scene }) }, token)
 };

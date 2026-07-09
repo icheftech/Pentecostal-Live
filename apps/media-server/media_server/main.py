@@ -1,23 +1,31 @@
+import asyncio
 import hmac
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+import httpx
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
 
 from media_server import schemas
+from media_server.capture import CaptureManager
 from media_server.config import get_settings
 from media_server.relay import RelayManager
 from pentecostal_ffmpeg import Destination, build_destination_url, resolve_rtmp_url
+
+logger = logging.getLogger("media_server.main")
 
 settings = get_settings()
 relay_manager = RelayManager(
     ffmpeg_binary=settings.ffmpeg_binary,
     hls_root=settings.hls_root,
 )
+capture_manager = CaptureManager(ffmpeg_binary=settings.ffmpeg_binary)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
+    capture_manager.stop_all()
     relay_manager.stop_all()
 
 
@@ -116,3 +124,61 @@ def stop_relay(stream_id: str):
 )
 def stream_stats(stream_id: str):
     return relay_manager.stats(stream_id)
+
+
+async def validate_ingest_key(ingest_key: str, client_addr: str) -> bool:
+    """Ask the main API whether this ingest key belongs to a live stream.
+
+    Same validation the RTMP on_publish path uses, so the browser Capture
+    Studio and hardware encoders share one trust model.
+    """
+    url = f"{get_settings().api_url.rstrip('/')}/v1/ingest/on-publish"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(url, data={"name": ingest_key, "addr": client_addr})
+        return response.status_code < 300
+    except httpx.HTTPError:
+        logger.warning("could not reach the API to validate an ingest key")
+        return False
+
+
+@app.websocket("/capture/{stream_id}")
+async def capture_websocket(websocket: WebSocket, stream_id: str):
+    """Capture Studio gateway: browser MediaRecorder chunks in, RTMP out.
+
+    Close codes: 4403 = missing/invalid ingest key, 1011 = encoder failure.
+    """
+    await websocket.accept()
+    ingest_key = websocket.query_params.get("key", "")
+    client_addr = websocket.client.host if websocket.client else "unknown"
+
+    if not ingest_key or not await validate_ingest_key(ingest_key, client_addr):
+        await websocket.close(code=4403)
+        return
+
+    publish_url = f"{get_settings().rtmp_publish_base_url.rstrip('/')}/{ingest_key}"
+    try:
+        handle = capture_manager.start(stream_id, publish_url)
+    except FileNotFoundError:
+        await websocket.close(code=1011)
+        return
+
+    await websocket.send_json({"type": "capture_started", "stream_id": stream_id})
+    try:
+        while True:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            chunk = message.get("bytes")
+            if not chunk:
+                continue
+            try:
+                await asyncio.to_thread(handle.feed, chunk)
+            except (BrokenPipeError, OSError):
+                logger.warning("capture encoder for %s died mid-stream", stream_id)
+                await websocket.close(code=1011)
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        capture_manager.stop(stream_id)

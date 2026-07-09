@@ -13,6 +13,13 @@ class Settings(BaseSettings):
         alias="PENTECOSTAL_LIVE_MEDIA_SERVER_TOKEN",
     )
     ffmpeg_binary: str = Field("ffmpeg", alias="PENTECOSTAL_LIVE_FFMPEG_BINARY")
+    # Main API base URL, used to validate Capture Studio ingest keys.
+    api_url: str = Field("http://localhost:8000", alias="PENTECOSTAL_LIVE_API_URL")
+    # RTMP base URL the capture gateway PUBLISHES to (the nginx-rtmp ingest).
+    rtmp_publish_base_url: str = Field(
+        "rtmp://localhost:1935/live",
+        alias="PENTECOSTAL_LIVE_RTMP_PUBLISH_BASE_URL",
+    )
     # Directory that HLS playlists/segments are written to (one subdir per stream).
     hls_root: str = Field("./data/hls", alias="PENTECOSTAL_LIVE_HLS_ROOT")
 

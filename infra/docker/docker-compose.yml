@@ -23,8 +23,59 @@ services:
       - ../../.env
     environment:
       PENTECOSTAL_LIVE_DB_URL: postgresql+psycopg://postgres:postgres@postgres:5432/pentecostal_live
+      PENTECOSTAL_LIVE_MEDIA_SERVER_URL: http://media-server:8001
+      # The media-server pulls the ingest over the Docker network; producers
+      # see the public URL from PENTECOSTAL_LIVE_RTMP_INGEST_BASE_URL (.env).
+      PENTECOSTAL_LIVE_RTMP_PULL_BASE_URL: rtmp://nginx-rtmp:1935/live
     ports:
       - "8000:8000"
 
+  media-server:
+    build:
+      context: ../..
+      dockerfile: apps/media-server/Dockerfile
+    container_name: pentecostal_live_media_server
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      PENTECOSTAL_LIVE_HLS_ROOT: /var/pentecostal-live/hls
+      PENTECOSTAL_LIVE_API_URL: http://api:8000
+      PENTECOSTAL_LIVE_RTMP_PUBLISH_BASE_URL: rtmp://nginx-rtmp:1935/live
+    volumes:
+      - hls_data:/var/pentecostal-live/hls
+    ports:
+      - "8001:8001"
+
+  # RTMP ingest edge: cameras/OBS publish to rtmp://<this-host>:1935/live/<key>.
+  # Publishes are validated against the API via on_publish (see infra/nginx/nginx.conf).
+  nginx-rtmp:
+    image: tiangolo/nginx-rtmp
+    container_name: pentecostal_live_ingest
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "1935:1935"
+      - "8080:8080"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - hls_data:/var/pentecostal-live/hls:ro
+
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: apps/dashboard/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/v1
+        NEXT_PUBLIC_MEDIA_SERVER_URL: http://localhost:8001
+    container_name: pentecostal_live_dashboard
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
 volumes:
   postgres_data:
+  hls_data:

@@ -97,3 +97,39 @@ def build_relay_command(
         "-fifo_options", "attempt_recovery=1:drop_pkts_on_overflow=1",
         "|".join(slaves),
     ]
+
+
+def build_capture_publish_command(
+    publish_url: str,
+    ffmpeg_binary: str = "ffmpeg",
+    video_bitrate_kbps: int = 4500,
+    audio_bitrate_kbps: int = 160,
+) -> list[str]:
+    """Build the FFmpeg argv for the browser Capture Studio gateway.
+
+    Reads a WebM byte stream (MediaRecorder output) from stdin, transcodes to
+    H.264/AAC — platforms will not take VP8/VP9 over RTMP — and publishes to
+    the ingest, where the normal relay fan-out picks it up.
+    """
+    if not publish_url:
+        raise ValueError("publish_url is required")
+
+    return [
+        ffmpeg_binary,
+        "-hide_banner",
+        "-loglevel", "warning",
+        "-i", "pipe:0",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-tune", "zerolatency",
+        "-pix_fmt", "yuv420p",
+        "-g", "60",
+        "-b:v", f"{video_bitrate_kbps}k",
+        "-maxrate", f"{video_bitrate_kbps}k",
+        "-bufsize", f"{video_bitrate_kbps * 2}k",
+        "-c:a", "aac",
+        "-b:a", f"{audio_bitrate_kbps}k",
+        "-ar", "44100",
+        "-f", "flv",
+        publish_url,
+    ]

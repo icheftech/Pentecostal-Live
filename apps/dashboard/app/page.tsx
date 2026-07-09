@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  Camera,
   Copy,
   KeyRound,
   LogOut,
@@ -14,6 +15,7 @@ import {
   Video
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import CaptureStudio from "./components/CaptureStudio";
 import { api, ApiError, streamMetricsSocketUrl } from "./lib/api";
 import type {
   Member,
@@ -46,6 +48,7 @@ export default function DashboardPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [liveMetrics, setLiveMetrics] = useState<StreamMetrics | null>(null);
+  const [ingestInfo, setIngestInfo] = useState<{ streamId: string; url: string } | null>(null);
 
   const liveStream = useMemo(() => streams.find((stream) => stream.status === "live"), [streams]);
   const liveStreamId = liveStream?.id ?? null;
@@ -339,12 +342,48 @@ export default function DashboardPage() {
     }
   }
 
-  async function copyInviteLink(link: string) {
+  async function copyText(text: string, successMessage: string) {
     try {
-      await navigator.clipboard.writeText(link);
-      setMessage("Invite link copied to clipboard.");
+      await navigator.clipboard.writeText(text);
+      setMessage(successMessage);
     } catch {
-      setMessage("Could not copy — select the link text manually.");
+      setMessage("Could not copy — select the text manually.");
+    }
+  }
+
+  function copyInviteLink(link: string) {
+    return copyText(link, "Invite link copied to clipboard.");
+  }
+
+  async function handleStartStream(streamId: string) {
+    if (!token) return;
+    setBusy(true);
+    try {
+      const result = await api.startStream(token, streamId);
+      if (result.ingest_url) {
+        setIngestInfo({ streamId, url: result.ingest_url });
+      }
+      await refresh();
+      setMessage(result.warning ? `Stream is live, but: ${result.warning}` : "Stream is live — connect your camera below.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not start the stream");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleStopStream(streamId: string) {
+    if (!token) return;
+    setBusy(true);
+    try {
+      const result = await api.stopStream(token, streamId);
+      setIngestInfo(null);
+      await refresh();
+      setMessage(result.warning ? `Stream ended, but: ${result.warning}` : "Stream ended.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not stop the stream");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -379,6 +418,7 @@ export default function DashboardPage() {
     setOrgChoices(null);
     setPendingLogin(null);
     setInviteResult(null);
+    setIngestInfo(null);
   }
 
   if (!token) {
@@ -581,9 +621,9 @@ export default function DashboardPage() {
                 </div>
                 <div className="button-row">
                   {stream.status === "live" ? (
-                    <button onClick={() => updateStream(() => api.stopStream(token, stream.id))}>Stop</button>
+                    <button onClick={() => void handleStopStream(stream.id)}>Stop</button>
                   ) : (
-                    <button onClick={() => updateStream(() => api.startStream(token, stream.id))}>Start</button>
+                    <button onClick={() => void handleStartStream(stream.id)}>Start</button>
                   )}
                   {defaultScenes.map((scene) => (
                     <button
@@ -599,6 +639,64 @@ export default function DashboardPage() {
             ))}
             {streams.length === 0 && <p className="empty">No streams scheduled.</p>}
           </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">
+            <Camera size={20} />
+            <h2>Camera</h2>
+          </div>
+          {liveStream && ingestInfo && ingestInfo.streamId === liveStream.id ? (
+            <>
+              <CaptureStudio
+                streamId={liveStream.id}
+                ingestKey={ingestInfo.url.slice(ingestInfo.url.lastIndexOf("/") + 1)}
+                onStatus={setMessage}
+              />
+              <details className="encoder-details">
+                <summary>Using a dedicated hardware encoder instead?</summary>
+                <div className="row">
+                  <div>
+                    <strong>Server</strong>
+                    <code>{ingestInfo.url.slice(0, ingestInfo.url.lastIndexOf("/"))}</code>
+                  </div>
+                  <button
+                    className="icon-button"
+                    onClick={() =>
+                      void copyText(ingestInfo.url.slice(0, ingestInfo.url.lastIndexOf("/")), "Server URL copied.")
+                    }
+                    title="Copy server URL"
+                    aria-label="Copy server URL"
+                  >
+                    <Copy size={16} />
+                  </button>
+                </div>
+                <div className="row">
+                  <div>
+                    <strong>Stream key</strong>
+                    <code>{ingestInfo.url.slice(ingestInfo.url.lastIndexOf("/") + 1)}</code>
+                  </div>
+                  <button
+                    className="icon-button"
+                    onClick={() =>
+                      void copyText(ingestInfo.url.slice(ingestInfo.url.lastIndexOf("/") + 1), "Stream key copied.")
+                    }
+                    title="Copy stream key"
+                    aria-label="Copy stream key"
+                  >
+                    <Copy size={16} />
+                  </button>
+                </div>
+                <p className="empty">The key changes on every stream start.</p>
+              </details>
+            </>
+          ) : (
+            <p className="empty">
+              {liveStream
+                ? "Camera connection details are issued at stream start — stop and start the stream to reconnect a camera."
+                : "Start a stream to connect a camera."}
+            </p>
+          )}
         </div>
 
         <div className="panel">

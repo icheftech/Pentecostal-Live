@@ -134,3 +134,9 @@ export type StreamMetrics = {
   health_status: string;
   destinations: StreamDestinationStatus[];
 };
+
+// Response from stream start/stop: the stream plus relay outcome.
+export type StreamActionResult = Stream & {
+  ingest_url?: string | null;
+  warning?: string | null;
+};

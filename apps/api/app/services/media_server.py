@@ -22,8 +22,16 @@ logger = logging.getLogger("app.services.media_server")
 REQUEST_TIMEOUT_SECONDS = 5.0
 
 def build_ingest_url(ingest_key: str) -> str:
+    """Public ingest URL producers paste into OBS/encoders."""
     settings = get_settings()
     return f"{settings.rtmp_ingest_base_url.rstrip('/')}/{ingest_key}"
+
+
+def build_pull_url(ingest_key: str) -> str:
+    """Ingest URL the media-server's ffmpeg pulls from (may be an internal host)."""
+    settings = get_settings()
+    base = settings.rtmp_pull_base_url or settings.rtmp_ingest_base_url
+    return f"{base.rstrip('/')}/{ingest_key}"
 
 
 def _headers() -> dict[str, str]:
@@ -92,7 +100,7 @@ def start_stream_relay(db: Session, stream: models.Stream) -> tuple[str, str | N
     warning = _post(
         f"/relays/{stream.id}/start",
         {
-            "ingest_url": ingest_url,
+            "ingest_url": build_pull_url(stream.ingest_key),
             "destinations": destinations,
             "hls": True,
         },
