@@ -1,14 +1,18 @@
+import secrets
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app import models, schemas
 from app.audit import record_audit_event
 from app.core.roles import require_roles
 from app.db import get_db
 from app.deps import CurrentContext, get_current_context
+from app.services import media_server, stream_stats
 
 
 router = APIRouter(prefix="/streams", tags=["streams"])
@@ -68,7 +72,7 @@ def create_stream(
 
 
 # Owner/admin/producer can go live
-@router.post("/{stream_id}/start", response_model=schemas.StreamOut)
+@router.post("/{stream_id}/start", response_model=schemas.StreamActionOut)
 def start_stream(
     stream_id: str,
     context: CurrentContext = Depends(get_current_context),
@@ -79,6 +83,7 @@ def start_stream(
     stream.status = "live"
     stream.started_at = datetime.now(UTC)
     stream.ended_at = None
+    stream.ingest_key = secrets.token_urlsafe(24)  # fresh key per service
     record_audit_event(
         db,
         event_type="stream.started",
@@ -89,11 +94,27 @@ def start_stream(
     )
     db.commit()
     db.refresh(stream)
-    return stream
+    # Media relay is best-effort: never block the state change on it.
+    ingest_url, warning = media_server.start_stream_relay(db, stream)
+    if warning:
+        record_audit_event(
+            db,
+            event_type="stream.media_relay_failed",
+            organization_id=context.organization.id,
+            actor_user_id=context.user.id,
+            resource_type="stream",
+            resource_id=stream.id,
+            details={"warning": warning},
+        )
+        db.commit()
+    out = schemas.StreamActionOut.model_validate(stream)
+    out.ingest_url = ingest_url
+    out.warning = warning
+    return out
 
 
 # Owner/admin/producer can end the stream
-@router.post("/{stream_id}/stop", response_model=schemas.StreamOut)
+@router.post("/{stream_id}/stop", response_model=schemas.StreamActionOut)
 def stop_stream(
     stream_id: str,
     context: CurrentContext = Depends(get_current_context),
@@ -113,7 +134,22 @@ def stop_stream(
     )
     db.commit()
     db.refresh(stream)
-    return stream
+    # Media relay is best-effort: never block the state change on it.
+    warning = media_server.stop_stream_relay(stream)
+    if warning:
+        record_audit_event(
+            db,
+            event_type="stream.media_relay_stop_failed",
+            organization_id=context.organization.id,
+            actor_user_id=context.user.id,
+            resource_type="stream",
+            resource_id=stream.id,
+            details={"warning": warning},
+        )
+        db.commit()
+    out = schemas.StreamActionOut.model_validate(stream)
+    out.warning = warning
+    return out
 
 
 # Owner/admin/producer can switch scenes
@@ -143,16 +179,61 @@ def change_scene(
 
 # Any authenticated org member can view metrics
 @router.get("/{stream_id}/metrics", response_model=schemas.StreamMetricsOut)
-def get_metrics(
+async def get_metrics(
     stream_id: str,
     context: CurrentContext = Depends(get_current_context),
     db: Session = Depends(get_db),
 ):
     stream = get_stream_or_404(db, stream_id, context.organization.id)
+    # Real stats come from the media server; if it is unreachable this
+    # returns an "offline"/zeros fallback rather than failing the request.
+    stats = await stream_stats.fetch_stream_stats(stream.id)
     return schemas.StreamMetricsOut(
         stream_id=stream.id,
-        bitrate_kbps=5980 if stream.status == "live" else 0,
-        viewer_count=124 if stream.status == "live" else 0,
-        dropped_frames=0,
-        health_status="excellent" if stream.status == "live" else "offline",
+        status=stats["status"],
+        bitrate_kbps=stats["bitrate_kbps"],
+        viewer_count=stats.get("viewer_count", 0),
+        uptime_seconds=stats["uptime_seconds"],
+        dropped_frames=stats["dropped_frames"],
+        health_status=stream_stats.derive_health(stats),
+        destinations=stats["destinations"],
+    )
+
+
+# Any authenticated org member can browse recordings
+@router.get("/{stream_id}/recordings", response_model=list[schemas.RecordingOut])
+def list_stream_recordings(
+    stream_id: str,
+    context: CurrentContext = Depends(get_current_context),
+    db: Session = Depends(get_db),
+):
+    stream = get_stream_or_404(db, stream_id, context.organization.id)
+    return media_server.list_recordings(stream.id)
+
+
+# Any authenticated org member can download a recording (proxied from the media-server)
+@router.get("/{stream_id}/recordings/{filename}")
+def download_stream_recording(
+    stream_id: str,
+    filename: str,
+    context: CurrentContext = Depends(get_current_context),
+    db: Session = Depends(get_db),
+):
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording not found")
+    stream = get_stream_or_404(db, stream_id, context.organization.id)
+    opened = media_server.open_recording_download(stream.id, filename)
+    if opened is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording not found")
+    client, upstream = opened
+
+    def close_upstream() -> None:
+        upstream.close()
+        client.close()
+
+    return StreamingResponse(
+        upstream.iter_bytes(),
+        media_type="video/x-matroska",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        background=BackgroundTask(close_upstream),
     )

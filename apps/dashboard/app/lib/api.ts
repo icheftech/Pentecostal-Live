@@ -1,17 +1,53 @@
 import type {
+  AcceptInviteRequest,
   LoginRequest,
   LoginResponse,
+  Member,
+  MemberInviteRequest,
+  MemberInviteResponse,
   Organization,
+  OrgMembership,
   PlatformKey,
   PlatformKeyCreate,
+  Recording,
   RegisterRequest,
   Stream,
+  StreamActionResult,
   StreamCreate,
   TokenResponse,
   UserContext
 } from "@pentecostal-live/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/v1";
+
+// WebSocket endpoint for live stream metrics (see apps/api/app/routers/ws.py).
+export function streamMetricsSocketUrl(streamId: string, token: string): string {
+  const wsBase = API_BASE_URL.replace(/^http/, "ws");
+  return `${wsBase}/ws/streams/${streamId}?token=${encodeURIComponent(token)}`;
+}
+
+const MEDIA_SERVER_URL = process.env.NEXT_PUBLIC_MEDIA_SERVER_URL ?? "http://localhost:8001";
+
+// Capture Studio gateway on the media-server; the per-start ingest key is the credential.
+export function captureSocketUrl(
+  streamId: string,
+  ingestKey: string,
+  options?: { stabilize?: boolean }
+): string {
+  const wsBase = MEDIA_SERVER_URL.replace(/^http/, "ws");
+  const stabilize = options?.stabilize ? "&stabilize=1" : "";
+  return `${wsBase}/capture/${streamId}?key=${encodeURIComponent(ingestKey)}${stabilize}`;
+}
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -25,7 +61,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(body.detail ?? "Request failed");
+    throw new ApiError(body.detail ?? "Request failed", response.status);
   }
 
   if (response.status === 204) {
@@ -40,7 +76,37 @@ export const api = {
     request<LoginResponse>("/auth/login", { method: "POST", body: JSON.stringify(payload) }),
   register: (payload: RegisterRequest) =>
     request<TokenResponse>("/auth/register", { method: "POST", body: JSON.stringify(payload) }),
+  acceptInvite: (payload: AcceptInviteRequest) =>
+    request<TokenResponse>("/auth/accept-invite", { method: "POST", body: JSON.stringify(payload) }),
+  refreshToken: (refreshToken: string) =>
+    request<TokenResponse>("/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: refreshToken })
+    }),
+  logout: (refreshToken: string) =>
+    request<void>("/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: refreshToken })
+    }),
   me: (token: string) => request<UserContext>("/auth/me", {}, token),
+  myOrgs: (token: string) => request<OrgMembership[]>("/auth/orgs", {}, token),
+  switchOrg: (token: string, orgSlug: string) =>
+    request<LoginResponse>(
+      "/auth/switch-org",
+      { method: "POST", body: JSON.stringify({ org_slug: orgSlug }) },
+      token
+    ),
+  members: (token: string) => request<Member[]>("/members", {}, token),
+  inviteMember: (token: string, payload: MemberInviteRequest) =>
+    request<MemberInviteResponse>(
+      "/members/invite",
+      { method: "POST", body: JSON.stringify(payload) },
+      token
+    ),
+  updateMemberRole: (token: string, userId: string, role: string) =>
+    request<Member>(`/members/${userId}`, { method: "PATCH", body: JSON.stringify({ role }) }, token),
+  removeMember: (token: string, userId: string) =>
+    request<void>(`/members/${userId}`, { method: "DELETE" }, token),
   organization: (token: string) => request<Organization>("/organizations/current", {}, token),
   platformKeys: (token: string) => request<PlatformKey[]>("/platform-keys", {}, token),
   createPlatformKey: (token: string, payload: PlatformKeyCreate) =>
@@ -55,9 +121,20 @@ export const api = {
   createStream: (token: string, payload: StreamCreate) =>
     request<Stream>("/streams", { method: "POST", body: JSON.stringify(payload) }, token),
   startStream: (token: string, id: string) =>
-    request<Stream>(`/streams/${id}/start`, { method: "POST" }, token),
+    request<StreamActionResult>(`/streams/${id}/start`, { method: "POST" }, token),
   stopStream: (token: string, id: string) =>
-    request<Stream>(`/streams/${id}/stop`, { method: "POST" }, token),
+    request<StreamActionResult>(`/streams/${id}/stop`, { method: "POST" }, token),
   changeScene: (token: string, id: string, scene: string) =>
-    request<Stream>(`/streams/${id}/scene`, { method: "POST", body: JSON.stringify({ scene }) }, token)
+    request<Stream>(`/streams/${id}/scene`, { method: "POST", body: JSON.stringify({ scene }) }, token),
+  recordings: (token: string, id: string) => request<Recording[]>(`/streams/${id}/recordings`, {}, token),
+  downloadRecording: async (token: string, id: string, filename: string): Promise<Blob> => {
+    const response = await fetch(
+      `${API_BASE_URL}/streams/${id}/recordings/${encodeURIComponent(filename)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!response.ok) {
+      throw new ApiError("Could not download the recording", response.status);
+    }
+    return response.blob();
+  }
 };

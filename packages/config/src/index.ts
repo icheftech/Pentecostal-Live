@@ -1,3 +1,7 @@
+// Platform metadata for dashboard display (labels, pickers).
+// The runtime source of truth for RTMP URLs is
+// services/ffmpeg/pentecostal_ffmpeg/platforms.py — the media-server resolves
+// destination URLs there. When adding a platform, update both files.
 export const supportedPlatforms = [
   { id: "youtube", label: "YouTube", rtmpUrl: "rtmp://a.rtmp.youtube.com/live2" },
   { id: "facebook", label: "Facebook", rtmpUrl: "rtmps://live-api-s.facebook.com:443/rtmp" },
@@ -7,4 +11,3 @@ export const supportedPlatforms = [
 ] as const;
 
 export type PlatformId = (typeof supportedPlatforms)[number]["id"];
-

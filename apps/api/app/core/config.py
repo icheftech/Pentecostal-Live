@@ -1,7 +1,16 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Dev-only default secrets. These are fine for local development and tests but
+# MUST be overridden outside of development/test — startup fails otherwise.
+DEFAULT_JWT_SECRET = "change_me_before_real_use"
+DEFAULT_FERNET_KEY = "t3wLwiGjnd21N2hPHC8Gk0cVLquXgVD+ZO3BkWvNlao="
+
+# Environments where shipping default secrets is acceptable.
+INSECURE_DEFAULTS_ALLOWED_ENVIRONMENTS = {"development", "test"}
 
 
 class Settings(BaseSettings):
@@ -12,13 +21,34 @@ class Settings(BaseSettings):
         "sqlite:///./pentecostal_live.db",
         alias="PENTECOSTAL_LIVE_DB_URL",
     )
-    jwt_secret: str = Field("change_me_before_real_use", alias="PENTECOSTAL_LIVE_JWT_SECRET")
+    jwt_secret: str = Field(DEFAULT_JWT_SECRET, alias="PENTECOSTAL_LIVE_JWT_SECRET")
     jwt_algorithm: str = "HS256"
-    access_token_minutes: int = 60 * 12
+    access_token_minutes: int = Field(30, alias="PENTECOSTAL_LIVE_ACCESS_TOKEN_MINUTES")
+    refresh_token_days: int = Field(30, alias="PENTECOSTAL_LIVE_REFRESH_TOKEN_DAYS")
+    rate_limit_enabled: bool = Field(True, alias="PENTECOSTAL_LIVE_RATE_LIMIT_ENABLED")
+    auth_rate_limit: str = Field("5/minute", alias="PENTECOSTAL_LIVE_AUTH_RATE_LIMIT")
     fernet_key: str = Field(
-        "t3wLwiGjnd21N2hPHC8Gk0cVLquXgVD+ZO3BkWvNlao=",
+        DEFAULT_FERNET_KEY,
         alias="PENTECOSTAL_LIVE_FERNET_KEY",
     )
+    media_server_url: str = Field(
+        "http://localhost:8001",
+        alias="PENTECOSTAL_LIVE_MEDIA_SERVER_URL",
+    )
+    media_server_token: str = Field(
+        "change_me_media_server_token",
+        alias="PENTECOSTAL_LIVE_MEDIA_SERVER_TOKEN",
+    )
+    # RTMP base URL (nginx-rtmp ingest) that per-stream ingest keys are appended to.
+    # This is the PUBLIC address shown to producers for OBS/encoders.
+    rtmp_ingest_base_url: str = Field(
+        "rtmp://localhost:1935/live",
+        alias="PENTECOSTAL_LIVE_RTMP_INGEST_BASE_URL",
+    )
+    # Base URL the media-server uses to PULL the ingest, when it differs from
+    # the public one (e.g. rtmp://nginx-rtmp:1935/live inside Docker).
+    # Empty = same as rtmp_ingest_base_url.
+    rtmp_pull_base_url: str = Field("", alias="PENTECOSTAL_LIVE_RTMP_PULL_BASE_URL")
     cors_origins: str = Field(
         "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173",
         alias="PENTECOSTAL_LIVE_API_CORS_ORIGINS",
@@ -27,6 +57,24 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @model_validator(mode="after")
+    def enforce_non_default_secrets(self) -> "Settings":
+        """Fail fast outside development/test if a secret still has its dev default."""
+        if self.environment in INSECURE_DEFAULTS_ALLOWED_ENVIRONMENTS:
+            return self
+        problems = []
+        if self.jwt_secret == DEFAULT_JWT_SECRET:
+            problems.append("PENTECOSTAL_LIVE_JWT_SECRET")
+        if self.fernet_key == DEFAULT_FERNET_KEY:
+            problems.append("PENTECOSTAL_LIVE_FERNET_KEY")
+        if problems:
+            raise RuntimeError(
+                f"Refusing to start in environment '{self.environment}': "
+                f"{' and '.join(problems)} still set to insecure development default(s). "
+                "Set unique secret values via environment variables before deploying."
+            )
+        return self
 
 
 @lru_cache

@@ -10,6 +10,11 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    refresh_token: str | None = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 class RegisterRequest(BaseModel):
@@ -31,6 +36,12 @@ class SwitchOrgRequest(BaseModel):
     org_slug: str
 
 
+class AcceptInviteRequest(BaseModel):
+    token: str = Field(min_length=10)
+    password: str = Field(min_length=10)
+    full_name: str | None = None
+
+
 class OrgMembership(BaseModel):
     """A single org + the user's role in that org."""
     organization: "OrganizationOut"
@@ -48,6 +59,7 @@ class LoginResponse(BaseModel):
     """
     access_token: str | None = None
     token_type: str = "bearer"
+    refresh_token: str | None = None
     organization: "OrganizationOut | None" = None
     role: str | None = None
     requires_org_selection: bool = False
@@ -88,6 +100,43 @@ class OrganizationOut(BaseModel):
 
 class OrganizationUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=120)
+
+
+# ---------------------------------------------------------------------------
+# Members
+# ---------------------------------------------------------------------------
+
+class MemberOut(BaseModel):
+    user_id: str
+    email: EmailStr
+    full_name: str | None
+    role: str
+    joined_at: datetime
+
+
+class MemberInviteRequest(BaseModel):
+    email: EmailStr
+    role: str = Field(min_length=2, max_length=60)
+
+
+class MemberInviteResponse(BaseModel):
+    """
+    Two outcomes:
+
+    1. status="member_added" — the invited email already had an account, so the
+       membership was created immediately. invite_token is None.
+    2. status="invitation_created" — an Invitation row was created and
+       invite_token holds the one-time token the admin shares with the invitee.
+    """
+    status: str
+    email: EmailStr
+    role: str
+    invite_token: str | None = None
+    expires_at: datetime | None = None
+
+
+class MemberRoleUpdate(BaseModel):
+    role: str = Field(min_length=2, max_length=60)
 
 
 # ---------------------------------------------------------------------------
@@ -150,14 +199,41 @@ class StreamOut(BaseModel):
     updated_at: datetime
 
 
+class StreamActionOut(StreamOut):
+    """Response for start/stop: stream state plus the media relay outcome.
+
+    warning is set when the media-server could not be reached or refused the
+    request — the stream state still changed; churches are never hard-blocked
+    from toggling state mid-service.
+    """
+
+    ingest_url: str | None = None
+    warning: str | None = None
+
+
+class StreamDestinationStatus(BaseModel):
+    platform: str
+    status: str
+
+
 class StreamMetricsOut(BaseModel):
     stream_id: str
+    # Media-server status for the stream: "live" or "offline"
+    status: str = "offline"
     bitrate_kbps: int
     viewer_count: int
+    uptime_seconds: int = 0
     dropped_frames: int
     health_status: str
+    destinations: list[StreamDestinationStatus] = Field(default_factory=list)
 
 
 # Rebuild forward refs after all models are defined
 LoginResponse.model_rebuild()
 OrgMembership.model_rebuild()
+
+
+class RecordingOut(BaseModel):
+    filename: str
+    size_bytes: int
+    modified_at: str

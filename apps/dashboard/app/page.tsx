@@ -1,47 +1,168 @@
 "use client";
 
-import { Activity, KeyRound, LogOut, Radio, RotateCw, ShieldCheck, Video } from "lucide-react";
+import {
+  Activity,
+  Camera,
+  Copy,
+  KeyRound,
+  LogOut,
+  Radio,
+  RotateCw,
+  ShieldCheck,
+  Trash2,
+  UserPlus,
+  Users,
+  Video
+} from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "./lib/api";
-import type { Organization, PlatformKey, Stream, UserContext } from "@pentecostal-live/types";
+import Studio from "./components/Studio";
+import { api, ApiError, streamMetricsSocketUrl } from "./lib/api";
+import type {
+  Member,
+  MemberInviteResponse,
+  Organization,
+  OrgMembership,
+  PlatformKey,
+  Recording,
+  Stream,
+  StreamMetrics,
+  UserContext
+} from "@pentecostal-live/types";
 
 const tokenStorageKey = "pentecostal_live_token";
+const refreshTokenStorageKey = "pentecostal_live_refresh_token";
 const defaultScenes = ["main", "sermon", "worship", "altar"];
 
 export default function DashboardPage() {
   const [token, setToken] = useState<string | null>(null);
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register" | "invite">("login");
   const [me, setMe] = useState<UserContext | null>(null);
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [platformKeys, setPlatformKeys] = useState<PlatformKey[]>([]);
   const [streams, setStreams] = useState<Stream[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [myOrgs, setMyOrgs] = useState<OrgMembership[]>([]);
+  const [orgChoices, setOrgChoices] = useState<OrgMembership[] | null>(null);
+  const [pendingLogin, setPendingLogin] = useState<{ email: string; password: string } | null>(null);
+  const [inviteToken, setInviteToken] = useState("");
+  const [inviteResult, setInviteResult] = useState<MemberInviteResponse | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [liveMetrics, setLiveMetrics] = useState<StreamMetrics | null>(null);
+  const [ingestInfo, setIngestInfo] = useState<{ streamId: string; url: string } | null>(null);
+  const [recordingsByStream, setRecordingsByStream] = useState<Record<string, Recording[]>>({});
 
   const liveStream = useMemo(() => streams.find((stream) => stream.status === "live"), [streams]);
+  const liveStreamId = liveStream?.id ?? null;
+
+  // Live metrics over the authenticated WebSocket while a stream is live.
+  useEffect(() => {
+    if (!token || !liveStreamId) {
+      setLiveMetrics(null);
+      return;
+    }
+    const socket = new WebSocket(streamMetricsSocketUrl(liveStreamId, token));
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(String(event.data)) as StreamMetrics;
+        if (payload.type === "metrics") {
+          setLiveMetrics(payload);
+        }
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    socket.onclose = () => setLiveMetrics(null);
+    return () => {
+      socket.onclose = null;
+      socket.close();
+      setLiveMetrics(null);
+    };
+  }, [token, liveStreamId]);
+  const canManageMembers = me?.role === "owner" || me?.role === "admin";
+  const assignableRoles = useMemo(
+    () => (me?.role === "owner" ? ["owner", "admin", "producer", "viewer"] : ["admin", "producer", "viewer"]),
+    [me?.role]
+  );
 
   useEffect(() => {
     setToken(window.localStorage.getItem(tokenStorageKey));
+    const urlToken = new URLSearchParams(window.location.search).get("invite_token");
+    if (urlToken) {
+      setInviteToken(urlToken);
+      setMode("invite");
+    }
   }, []);
 
-  const refresh = useCallback(async (currentToken = token) => {
-    if (!currentToken) return;
-    const [userContext, org, keys, streamList] = await Promise.all([
+  const loadAll = useCallback(async (currentToken: string) => {
+    const [userContext, org, keys, streamList, memberList, orgList] = await Promise.all([
       api.me(currentToken),
       api.organization(currentToken),
       api.platformKeys(currentToken),
-      api.streams(currentToken)
+      api.streams(currentToken),
+      api.members(currentToken),
+      api.myOrgs(currentToken)
     ]);
     setMe(userContext);
     setOrganization(org);
     setPlatformKeys(keys);
     setStreams(streamList);
-  }, [token]);
+    setMembers(memberList);
+    setMyOrgs(orgList);
+  }, []);
+
+  // Trade the stored refresh token for a new access/refresh pair.
+  // Returns the new access token, or null if the session can't be renewed.
+  const renewSession = useCallback(async (): Promise<string | null> => {
+    const storedRefreshToken = window.localStorage.getItem(refreshTokenStorageKey);
+    if (!storedRefreshToken) return null;
+    try {
+      const pair = await api.refreshToken(storedRefreshToken);
+      window.localStorage.setItem(tokenStorageKey, pair.access_token);
+      if (pair.refresh_token) {
+        window.localStorage.setItem(refreshTokenStorageKey, pair.refresh_token);
+      }
+      setToken(pair.access_token);
+      return pair.access_token;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const refresh = useCallback(async (currentToken = token) => {
+    if (!currentToken) return;
+    try {
+      await loadAll(currentToken);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        const renewedToken = await renewSession();
+        if (renewedToken) {
+          await loadAll(renewedToken);
+          return;
+        }
+        signOut();
+        setMessage("Session expired — please sign in again.");
+        return;
+      }
+      throw error;
+    }
+  }, [token, loadAll, renewSession]);
 
   useEffect(() => {
     if (!token) return;
     void refresh(token);
   }, [refresh, token]);
+
+  function adoptToken(accessToken: string, refreshToken?: string | null) {
+    window.localStorage.setItem(tokenStorageKey, accessToken);
+    if (refreshToken) {
+      window.localStorage.setItem(refreshTokenStorageKey, refreshToken);
+    }
+    setToken(accessToken);
+    setOrgChoices(null);
+    setPendingLogin(null);
+    setMessage("Signed in.");
+  }
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -49,28 +170,83 @@ export default function DashboardPage() {
     setMessage("");
     const data = new FormData(event.currentTarget);
     try {
-      const response =
-        mode === "login"
-          ? await api.login({
-              email: String(data.get("email")),
-              password: String(data.get("password"))
-            })
-          : await api.register({
-              organization_name: String(data.get("organizationName")),
-              organization_slug: String(data.get("organizationSlug")),
-              email: String(data.get("email")),
-              password: String(data.get("password")),
-              full_name: String(data.get("fullName") || "")
-            });
-      if (!response.access_token) {
-        setMessage("Choose an organization to continue.");
-        return;
+      if (mode === "login") {
+        const email = String(data.get("email"));
+        const password = String(data.get("password"));
+        const response = await api.login({ email, password });
+        if (response.requires_org_selection) {
+          setOrgChoices(response.organizations);
+          setPendingLogin({ email, password });
+          setMessage("Choose an organization to continue.");
+          return;
+        }
+        if (!response.access_token) {
+          setMessage("Login failed.");
+          return;
+        }
+        adoptToken(response.access_token, response.refresh_token);
+      } else if (mode === "register") {
+        const response = await api.register({
+          organization_name: String(data.get("organizationName")),
+          organization_slug: String(data.get("organizationSlug")),
+          email: String(data.get("email")),
+          password: String(data.get("password")),
+          full_name: String(data.get("fullName") || "")
+        });
+        adoptToken(response.access_token, response.refresh_token);
+      } else {
+        const response = await api.acceptInvite({
+          token: inviteToken,
+          password: String(data.get("password")),
+          full_name: String(data.get("fullName") || "")
+        });
+        window.history.replaceState(null, "", window.location.pathname);
+        adoptToken(response.access_token, response.refresh_token);
       }
-      window.localStorage.setItem(tokenStorageKey, response.access_token);
-      setToken(response.access_token);
-      setMessage("Signed in.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Authentication failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleOrgChoice(orgSlug: string) {
+    if (!pendingLogin) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await api.login({ ...pendingLogin, org_slug: orgSlug });
+      if (!response.access_token) {
+        setMessage("Login failed.");
+        return;
+      }
+      adoptToken(response.access_token, response.refresh_token);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Authentication failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSwitchOrg(orgSlug: string) {
+    if (!token || orgSlug === organization?.slug) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await api.switchOrg(token, orgSlug);
+      if (!response.access_token) {
+        setMessage("Could not switch organization.");
+        return;
+      }
+      setInviteResult(null);
+      window.localStorage.setItem(tokenStorageKey, response.access_token);
+      if (response.refresh_token) {
+        window.localStorage.setItem(refreshTokenStorageKey, response.refresh_token);
+      }
+      setToken(response.access_token);
+      setMessage(`Switched to ${response.organization?.name ?? orgSlug}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not switch organization");
     } finally {
       setBusy(false);
     }
@@ -114,6 +290,133 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleInvite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token) return;
+    setBusy(true);
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    try {
+      const response = await api.inviteMember(token, {
+        email: String(data.get("inviteEmail")),
+        role: String(data.get("inviteRole"))
+      });
+      form.reset();
+      setInviteResult(response);
+      await refresh();
+      setMessage(
+        response.status === "member_added"
+          ? `${response.email} added as ${response.role}.`
+          : `Invitation created for ${response.email}.`
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not invite member");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRoleChange(userId: string, role: string) {
+    if (!token) return;
+    setBusy(true);
+    try {
+      await api.updateMemberRole(token, userId, role);
+      await refresh();
+      setMessage("Member role updated.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not update member role");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRemoveMember(userId: string, email: string) {
+    if (!token) return;
+    setBusy(true);
+    try {
+      await api.removeMember(token, userId);
+      await refresh();
+      setMessage(`${email} removed from the organization.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not remove member");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyText(text: string, successMessage: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setMessage(successMessage);
+    } catch {
+      setMessage("Could not copy — select the text manually.");
+    }
+  }
+
+  function copyInviteLink(link: string) {
+    return copyText(link, "Invite link copied to clipboard.");
+  }
+
+  async function handleStartStream(streamId: string) {
+    if (!token) return;
+    setBusy(true);
+    try {
+      const result = await api.startStream(token, streamId);
+      if (result.ingest_url) {
+        setIngestInfo({ streamId, url: result.ingest_url });
+      }
+      await refresh();
+      setMessage(result.warning ? `Stream is live, but: ${result.warning}` : "Stream is live — connect your camera below.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not start the stream");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleStopStream(streamId: string) {
+    if (!token) return;
+    setBusy(true);
+    try {
+      const result = await api.stopStream(token, streamId);
+      setIngestInfo(null);
+      await refresh();
+      setMessage(result.warning ? `Stream ended, but: ${result.warning}` : "Stream ended.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not stop the stream");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadRecordings(streamId: string) {
+    if (!token) return;
+    try {
+      const recordings = await api.recordings(token, streamId);
+      setRecordingsByStream((previous) => ({ ...previous, [streamId]: recordings }));
+    } catch {
+      setMessage("Could not load recordings.");
+    }
+  }
+
+  async function handleDownloadRecording(streamId: string, filename: string) {
+    if (!token) return;
+    setBusy(true);
+    try {
+      const blob = await api.downloadRecording(token, streamId, filename);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not download the recording");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateStream(action: () => Promise<Stream>) {
     setBusy(true);
     try {
@@ -128,12 +431,24 @@ export default function DashboardPage() {
   }
 
   function signOut() {
+    const storedRefreshToken = window.localStorage.getItem(refreshTokenStorageKey);
+    if (storedRefreshToken) {
+      // Best-effort server-side revocation; local sign-out proceeds regardless.
+      void api.logout(storedRefreshToken).catch(() => undefined);
+    }
+    window.localStorage.removeItem(refreshTokenStorageKey);
     window.localStorage.removeItem(tokenStorageKey);
     setToken(null);
     setMe(null);
     setOrganization(null);
     setPlatformKeys([]);
     setStreams([]);
+    setMembers([]);
+    setMyOrgs([]);
+    setOrgChoices(null);
+    setPendingLogin(null);
+    setInviteResult(null);
+    setIngestInfo(null);
   }
 
   if (!token) {
@@ -147,44 +462,96 @@ export default function DashboardPage() {
               Secure org-scoped livestream control for platform keys, scenes, and service broadcasts.
             </p>
           </div>
-          <div className="mode-switch" role="tablist" aria-label="Authentication mode">
-            <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
-              Login
-            </button>
-            <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>
-              Register
-            </button>
-          </div>
-          <form className="stack" onSubmit={handleAuth}>
-            {mode === "register" && (
-              <>
+          {orgChoices ? (
+            <div className="stack">
+              <p className="lede">You belong to multiple organizations. Choose one to continue.</p>
+              <div className="org-picker">
+                {orgChoices.map(({ organization: org, role }) => (
+                  <button key={org.id} onClick={() => void handleOrgChoice(org.slug)} disabled={busy}>
+                    <span>{org.name}</span>
+                    <span className="pill">{role}</span>
+                  </button>
+                ))}
+              </div>
+              <button
+                className="secondary"
+                onClick={() => {
+                  setOrgChoices(null);
+                  setPendingLogin(null);
+                  setMessage("");
+                }}
+              >
+                Back to login
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="mode-switch" role="tablist" aria-label="Authentication mode">
+                <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
+                  Login
+                </button>
+                <button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>
+                  Register
+                </button>
+              </div>
+              <form className="stack" onSubmit={handleAuth}>
+                {mode === "register" && (
+                  <>
+                    <label>
+                      Organization
+                      <input name="organizationName" placeholder="PMBC Media" required />
+                    </label>
+                    <label>
+                      Organization slug
+                      <input name="organizationSlug" placeholder="pmbc-media" required />
+                    </label>
+                    <label>
+                      Full name
+                      <input name="fullName" placeholder="Production Lead" />
+                    </label>
+                  </>
+                )}
+                {mode === "invite" && (
+                  <>
+                    <p className="lede">You have been invited to join an organization. Set up your account.</p>
+                    <label>
+                      Invite token
+                      <input
+                        name="inviteToken"
+                        value={inviteToken}
+                        onChange={(event) => setInviteToken(event.target.value)}
+                        placeholder="Paste your invite token"
+                        required
+                      />
+                    </label>
+                    <label>
+                      Full name
+                      <input name="fullName" placeholder="Volunteer Producer" />
+                    </label>
+                  </>
+                )}
+                {mode !== "invite" && (
+                  <label>
+                    Email
+                    <input name="email" type="email" placeholder="producer@example.com" required />
+                  </label>
+                )}
                 <label>
-                  Organization
-                  <input name="organizationName" placeholder="PMBC Media" required />
+                  Password
+                  <input name="password" type="password" minLength={10} required />
                 </label>
-                <label>
-                  Organization slug
-                  <input name="organizationSlug" placeholder="pmbc-media" required />
-                </label>
-                <label>
-                  Full name
-                  <input name="fullName" placeholder="Production Lead" />
-                </label>
-              </>
-            )}
-            <label>
-              Email
-              <input name="email" type="email" placeholder="producer@example.com" required />
-            </label>
-            <label>
-              Password
-              <input name="password" type="password" minLength={10} required />
-            </label>
-            <button className="primary" disabled={busy}>
-              <ShieldCheck size={18} />
-              {mode === "login" ? "Sign in" : "Create organization"}
-            </button>
-          </form>
+                <button className="primary" disabled={busy}>
+                  <ShieldCheck size={18} />
+                  {mode === "login" ? "Sign in" : mode === "register" ? "Create organization" : "Accept invite"}
+                </button>
+              </form>
+              {mode === "invite" && (
+                <button className="secondary" onClick={() => setMode("login")}>
+                  Back to login
+                </button>
+              )}
+            </>
+          )}
           {message && <p className="message">{message}</p>}
         </section>
       </main>
@@ -199,6 +566,21 @@ export default function DashboardPage() {
           <h1>{organization?.name ?? "Pentecostal Live"}</h1>
         </div>
         <div className="topbar-actions">
+          {myOrgs.length > 1 && (
+            <select
+              className="org-switcher"
+              value={organization?.slug ?? ""}
+              onChange={(event) => void handleSwitchOrg(event.target.value)}
+              disabled={busy}
+              aria-label="Switch organization"
+            >
+              {myOrgs.map((membership) => (
+                <option key={membership.organization.id} value={membership.organization.slug}>
+                  {membership.organization.name}
+                </option>
+              ))}
+            </select>
+          )}
           <span>{me?.user.email}</span>
           <button className="icon-button" onClick={signOut} aria-label="Sign out" title="Sign out">
             <LogOut size={18} />
@@ -269,9 +651,9 @@ export default function DashboardPage() {
                 </div>
                 <div className="button-row">
                   {stream.status === "live" ? (
-                    <button onClick={() => updateStream(() => api.stopStream(token, stream.id))}>Stop</button>
+                    <button onClick={() => void handleStopStream(stream.id)}>Stop</button>
                   ) : (
-                    <button onClick={() => updateStream(() => api.startStream(token, stream.id))}>Start</button>
+                    <button onClick={() => void handleStartStream(stream.id)}>Start</button>
                   )}
                   {defaultScenes.map((scene) => (
                     <button
@@ -283,9 +665,181 @@ export default function DashboardPage() {
                     </button>
                   ))}
                 </div>
+                <details
+                  className="recordings"
+                  onToggle={(event) => {
+                    if ((event.target as HTMLDetailsElement).open) void loadRecordings(stream.id);
+                  }}
+                >
+                  <summary>Recordings</summary>
+                  <div className="table-list">
+                    {(recordingsByStream[stream.id] ?? []).map((recording) => (
+                      <div className="row" key={recording.filename}>
+                        <div>
+                          <strong>{recording.filename}</strong>
+                          <span>{(recording.size_bytes / (1024 * 1024)).toFixed(1)} MB</span>
+                        </div>
+                        <button
+                          disabled={busy}
+                          onClick={() => void handleDownloadRecording(stream.id, recording.filename)}
+                        >
+                          Download
+                        </button>
+                      </div>
+                    ))}
+                    {(recordingsByStream[stream.id] ?? []).length === 0 && (
+                      <p className="empty">No recordings yet — every broadcast is archived automatically.</p>
+                    )}
+                  </div>
+                </details>
               </div>
             ))}
             {streams.length === 0 && <p className="empty">No streams scheduled.</p>}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">
+            <Camera size={20} />
+            <h2>Studio</h2>
+          </div>
+          {liveStream && ingestInfo && ingestInfo.streamId === liveStream.id ? (
+            <>
+              <Studio
+                streamId={liveStream.id}
+                ingestKey={ingestInfo.url.slice(ingestInfo.url.lastIndexOf("/") + 1)}
+                activeScene={liveStream.active_scene}
+                orgSlug={organization?.slug ?? "org"}
+                onStatus={setMessage}
+              />
+              <details className="encoder-details">
+                <summary>Using a dedicated hardware encoder instead?</summary>
+                <div className="row">
+                  <div>
+                    <strong>Server</strong>
+                    <code>{ingestInfo.url.slice(0, ingestInfo.url.lastIndexOf("/"))}</code>
+                  </div>
+                  <button
+                    className="icon-button"
+                    onClick={() =>
+                      void copyText(ingestInfo.url.slice(0, ingestInfo.url.lastIndexOf("/")), "Server URL copied.")
+                    }
+                    title="Copy server URL"
+                    aria-label="Copy server URL"
+                  >
+                    <Copy size={16} />
+                  </button>
+                </div>
+                <div className="row">
+                  <div>
+                    <strong>Stream key</strong>
+                    <code>{ingestInfo.url.slice(ingestInfo.url.lastIndexOf("/") + 1)}</code>
+                  </div>
+                  <button
+                    className="icon-button"
+                    onClick={() =>
+                      void copyText(ingestInfo.url.slice(ingestInfo.url.lastIndexOf("/") + 1), "Stream key copied.")
+                    }
+                    title="Copy stream key"
+                    aria-label="Copy stream key"
+                  >
+                    <Copy size={16} />
+                  </button>
+                </div>
+                <p className="empty">The key changes on every stream start.</p>
+              </details>
+            </>
+          ) : (
+            <p className="empty">
+              {liveStream
+                ? "Studio credentials are issued at stream start — stop and start the stream to reopen the studio."
+                : "Start a stream to open the studio."}
+            </p>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-title">
+            <Users size={20} />
+            <h2>Team</h2>
+          </div>
+          {canManageMembers && (
+            <form className="inline-form invite-form" onSubmit={handleInvite}>
+              <input name="inviteEmail" type="email" placeholder="member@example.com" required />
+              <select name="inviteRole" defaultValue="viewer" aria-label="Invite role">
+                {assignableRoles.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+              <button disabled={busy} title="Invite member" aria-label="Invite member">
+                <UserPlus size={18} />
+              </button>
+            </form>
+          )}
+          {inviteResult?.status === "invitation_created" && inviteResult.invite_token && (
+            <div className="invite-note">
+              <div>
+                <strong>Invitation for {inviteResult.email}</strong>
+                <span>Share this link with them — invites are not emailed automatically.</span>
+                <code>{`${window.location.origin}/?invite_token=${inviteResult.invite_token}`}</code>
+              </div>
+              <button
+                className="icon-button"
+                onClick={() =>
+                  void copyInviteLink(`${window.location.origin}/?invite_token=${inviteResult.invite_token}`)
+                }
+                title="Copy invite link"
+                aria-label="Copy invite link"
+              >
+                <Copy size={16} />
+              </button>
+            </div>
+          )}
+          <div className="table-list">
+            {members.map((member) => {
+              const canEditMember =
+                canManageMembers &&
+                member.user_id !== me?.user.id &&
+                (me?.role === "owner" || member.role !== "owner");
+              return (
+                <div className="row" key={member.user_id}>
+                  <div>
+                    <strong>{member.full_name || member.email}</strong>
+                    <span>{member.email}</span>
+                  </div>
+                  {canEditMember ? (
+                    <div className="member-actions">
+                      <select
+                        value={member.role}
+                        onChange={(event) => void handleRoleChange(member.user_id, event.target.value)}
+                        disabled={busy}
+                        aria-label={`Role for ${member.email}`}
+                      >
+                        {assignableRoles.map((role) => (
+                          <option key={role} value={role}>
+                            {role}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="icon-button danger"
+                        onClick={() => void handleRemoveMember(member.user_id, member.email)}
+                        disabled={busy}
+                        title={`Remove ${member.email}`}
+                        aria-label={`Remove ${member.email}`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className={member.role === "owner" ? "pill live" : "pill"}>{member.role}</span>
+                  )}
+                </div>
+              );
+            })}
+            {members.length === 0 && <p className="empty">No members yet.</p>}
           </div>
         </div>
 
@@ -297,7 +851,43 @@ export default function DashboardPage() {
           <div className="monitor">
             <Radio size={52} />
             <strong>{liveStream?.title ?? "No active broadcast"}</strong>
-            <span>{liveStream ? "RTMP/HLS handoff ready for media server integration." : "Start a stream to arm metrics."}</span>
+            {liveStream && liveMetrics ? (
+              <>
+                <span className={`pill ${liveMetrics.health_status === "excellent" ? "live" : ""}`}>
+                  {liveMetrics.health_status}
+                </span>
+                <div className="monitor-stats">
+                  <div>
+                    <span>Bitrate</span>
+                    <strong>{liveMetrics.bitrate_kbps} kbps</strong>
+                  </div>
+                  <div>
+                    <span>Uptime</span>
+                    <strong>
+                      {Math.floor(liveMetrics.uptime_seconds / 60)}m {liveMetrics.uptime_seconds % 60}s
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Dropped</span>
+                    <strong>{liveMetrics.dropped_frames}</strong>
+                  </div>
+                </div>
+                {liveMetrics.destinations.length > 0 && (
+                  <div className="monitor-destinations">
+                    {liveMetrics.destinations.map((destination) => (
+                      <span
+                        key={destination.platform}
+                        className={destination.status === "connected" ? "pill live" : "pill"}
+                      >
+                        {destination.platform}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <span>{liveStream ? "Connecting to live metrics…" : "Start a stream to arm metrics."}</span>
+            )}
           </div>
           <button className="secondary" onClick={() => refresh()} disabled={busy}>
             <RotateCw size={18} />

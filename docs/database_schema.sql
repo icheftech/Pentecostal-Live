@@ -1,5 +1,9 @@
 -- Pentecostal Live Phase 1 Database Schema
 -- PostgreSQL baseline schema
+--
+-- REFERENCE DOCUMENTATION ONLY. Do not execute this file against a live
+-- database. The actual schema is created and managed by Alembic migrations
+-- in apps/api/alembic/ (run via `alembic upgrade head`).
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 

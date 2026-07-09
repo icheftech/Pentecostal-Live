@@ -56,11 +56,15 @@ Create an environment file:
 cp .env.example .env
 ```
 
-Start PostgreSQL and the API through Docker:
+Start the full stack (PostgreSQL, API, media-server, RTMP ingest, dashboard)
+through Docker:
 
 ```bash
 docker compose -f infra/docker/docker-compose.yml up --build
 ```
+
+To broadcast from a webcam or HDMI/SDI capture device, see
+[docs/connect_a_camera.md](docs/connect_a_camera.md).
 
 Or run the API directly:
 

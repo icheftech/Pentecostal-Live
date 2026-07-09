@@ -1,12 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models, schemas
 from app.audit import record_audit_event
+from app.core.config import get_settings
+from app.core.limiter import limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db import get_db
 from app.deps import CurrentContext, get_current_context
+from app.token_store import issue_refresh_token
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -34,7 +39,12 @@ def ensure_roles(db: Session) -> models.Role:
 
 
 @router.post("/register", response_model=schemas.TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: schemas.RegisterRequest, db: Session = Depends(get_db)) -> schemas.TokenResponse:
+@limiter.limit(get_settings().auth_rate_limit)
+def register(
+    request: Request,
+    payload: schemas.RegisterRequest,
+    db: Session = Depends(get_db),
+) -> schemas.TokenResponse:
     existing_user = db.scalar(select(models.User).where(models.User.email == payload.email.lower()))
     existing_org = db.scalar(select(models.Organization).where(models.Organization.slug == payload.organization_slug))
     if existing_user or existing_org:
@@ -58,12 +68,17 @@ def register(payload: schemas.RegisterRequest, db: Session = Depends(get_db)) ->
         resource_type="organization",
         resource_id=organization.id,
     )
+    refresh_token = issue_refresh_token(db, user.id, organization.id)
     db.commit()
-    return schemas.TokenResponse(access_token=create_access_token(user.id, organization.id))
+    return schemas.TokenResponse(
+        access_token=create_access_token(user.id, organization.id),
+        refresh_token=refresh_token,
+    )
 
 
 @router.post("/login", response_model=schemas.LoginResponse)
-def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schemas.LoginResponse:
+@limiter.limit(get_settings().auth_rate_limit)
+def login(request: Request, payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schemas.LoginResponse:
     # 1. Verify credentials
     user = db.scalar(select(models.User).where(models.User.email == payload.email.lower()))
     if user is None or not verify_password(payload.password, user.password_hash):
@@ -103,9 +118,11 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schem
             actor_user_id=user.id,
             details={"org_slug": org.slug},
         )
+        refresh_token = issue_refresh_token(db, user.id, org.id)
         db.commit()
         return schemas.LoginResponse(
             access_token=create_access_token(user.id, org.id),
+            refresh_token=refresh_token,
             organization=schemas.OrganizationOut.model_validate(org),
             role=role.name,
         )
@@ -120,9 +137,11 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schem
             actor_user_id=user.id,
             details={"org_slug": org.slug},
         )
+        refresh_token = issue_refresh_token(db, user.id, org.id)
         db.commit()
         return schemas.LoginResponse(
             access_token=create_access_token(user.id, org.id),
+            refresh_token=refresh_token,
             organization=schemas.OrganizationOut.model_validate(org),
             role=role.name,
         )
@@ -139,6 +158,65 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)) -> schem
             for org, role in rows
         ],
     )
+
+
+@router.post("/accept-invite", response_model=schemas.TokenResponse, status_code=status.HTTP_201_CREATED)
+def accept_invite(payload: schemas.AcceptInviteRequest, db: Session = Depends(get_db)) -> schemas.TokenResponse:
+    """
+    Redeem an invitation token (see POST /v1/members/invite): creates the user
+    account and the org membership, marks the invitation accepted, and returns
+    a login token scoped to the inviting organization. Unauthenticated — the
+    token itself is the credential.
+    """
+    invitation = db.scalar(select(models.Invitation).where(models.Invitation.token == payload.token))
+    if invitation is None or invitation.accepted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation is invalid, expired, or already used",
+        )
+
+    expires_at = invitation.expires_at
+    if expires_at.tzinfo is None:  # SQLite returns naive datetimes
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if expires_at <= datetime.now(UTC):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation is invalid, expired, or already used",
+        )
+
+    existing_user = db.scalar(select(models.User).where(models.User.email == invitation.email))
+    if existing_user is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="An account with this email already exists — sign in instead",
+        )
+
+    user = models.User(
+        email=invitation.email,
+        full_name=payload.full_name,
+        password_hash=hash_password(payload.password),
+    )
+    db.add(user)
+    db.flush()
+    db.add(
+        models.Membership(
+            organization_id=invitation.organization_id,
+            user_id=user.id,
+            role_id=invitation.role_id,
+        )
+    )
+    invitation.accepted_at = datetime.now(UTC)
+    record_audit_event(
+        db,
+        event_type="auth.invite_accepted",
+        organization_id=invitation.organization_id,
+        actor_user_id=user.id,
+        resource_type="invitation",
+        resource_id=invitation.id,
+        details={"email": invitation.email},
+    )
+    db.commit()
+    return schemas.TokenResponse(access_token=create_access_token(user.id, invitation.organization_id))
 
 
 @router.get("/orgs", response_model=list[schemas.OrgMembership])
@@ -190,9 +268,11 @@ def switch_org(
         actor_user_id=context.user.id,
         details={"from_org": context.organization.slug, "to_org": org.slug},
     )
+    refresh_token = issue_refresh_token(db, context.user.id, org.id)
     db.commit()
     return schemas.LoginResponse(
         access_token=create_access_token(context.user.id, org.id),
+        refresh_token=refresh_token,
         organization=schemas.OrganizationOut.model_validate(org),
         role=role.name,
     )
