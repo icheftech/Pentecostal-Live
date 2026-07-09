@@ -13,6 +13,7 @@ class RelayStartRequest(BaseModel):
     ingest_url: str = Field(min_length=1)
     destinations: list[DestinationIn] = Field(default_factory=list)
     hls: bool = True
+    record: bool = True
 
 
 class RelayStartResponse(BaseModel):
@@ -21,6 +22,13 @@ class RelayStartResponse(BaseModel):
     destinations: list[dict]
     hls: bool
     restarted: bool = False
+    recording_file: str | None = None
+
+
+class RecordingFile(BaseModel):
+    filename: str
+    size_bytes: int
+    modified_at: str
 
 
 class RelayStopResponse(BaseModel):

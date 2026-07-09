@@ -173,6 +173,65 @@ def test_start_all_unknown_and_no_hls_is_422():
     assert response.status_code == 422
 
 
+def test_start_records_by_default_and_reports_filename():
+    response = client.post(
+        "/relays/stream-rec/start",
+        headers=AUTH,
+        json={
+            "ingest_url": "rtmp://localhost:1935/live/k",
+            "destinations": [{"platform": "youtube", "stream_key": "yt-key"}],
+            "hls": False,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recording_file"] and body["recording_file"].endswith(".mkv")
+    tee = FakePopen.instances[0].argv[-1]
+    assert "f=matroska" in tee and body["recording_file"] in tee
+
+
+def test_start_record_false_skips_recording():
+    response = client.post(
+        "/relays/stream-norec/start",
+        headers=AUTH,
+        json={
+            "ingest_url": "rtmp://localhost:1935/live/k",
+            "destinations": [{"platform": "youtube", "stream_key": "yt-key"}],
+            "hls": False,
+            "record": False,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["recording_file"] is None
+    assert "matroska" not in FakePopen.instances[0].argv[-1]
+
+
+def test_recordings_list_and_download(tmp_path, monkeypatch):
+    import media_server.main as main_module
+
+    root = tmp_path / "recordings"
+    (root / "stream-x").mkdir(parents=True)
+    (root / "stream-x" / "20260101-101500.mkv").write_bytes(b"fake-video-bytes")
+
+    settings = main_module.get_settings()
+    monkeypatch.setattr(settings, "recordings_root", str(root))
+
+    listing = client.get("/recordings/stream-x", headers=AUTH)
+    assert listing.status_code == 200
+    body = listing.json()
+    assert [item["filename"] for item in body] == ["20260101-101500.mkv"]
+    assert body[0]["size_bytes"] == len(b"fake-video-bytes")
+
+    download = client.get("/recordings/stream-x/20260101-101500.mkv", headers=AUTH)
+    assert download.status_code == 200
+    assert download.content == b"fake-video-bytes"
+
+    traversal = client.get("/recordings/stream-x/..%2Fsecret", headers=AUTH)
+    assert traversal.status_code in (404, 400)
+
+    assert client.get("/recordings/stream-x", ).status_code == 401
+
+
 def test_start_with_no_outputs_is_422():
     response = client.post(
         "/relays/stream-4/start",

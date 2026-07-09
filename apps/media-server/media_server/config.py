@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     )
     # Directory that HLS playlists/segments are written to (one subdir per stream).
     hls_root: str = Field("./data/hls", alias="PENTECOSTAL_LIVE_HLS_ROOT")
+    # Directory broadcast recordings are archived to (one subdir per stream).
+    recordings_root: str = Field("./data/recordings", alias="PENTECOSTAL_LIVE_RECORDINGS_ROOT")
+    recording_enabled: bool = Field(True, alias="PENTECOSTAL_LIVE_RECORDING_ENABLED")
 
 
 @lru_cache

@@ -2,9 +2,12 @@ import asyncio
 import hmac
 import logging
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import FileResponse
 
 from media_server import schemas
 from media_server.capture import CaptureManager
@@ -18,6 +21,7 @@ settings = get_settings()
 relay_manager = RelayManager(
     ffmpeg_binary=settings.ffmpeg_binary,
     hls_root=settings.hls_root,
+    recordings_root=settings.recordings_root,
 )
 capture_manager = CaptureManager(ffmpeg_binary=settings.ffmpeg_binary)
 
@@ -83,6 +87,7 @@ def start_relay(stream_id: str, payload: schemas.RelayStartRequest):
             ingest_url=payload.ingest_url,
             destinations=destinations,
             hls=payload.hls,
+            record=payload.record and get_settings().recording_enabled,
         )
     except FileNotFoundError as exc:
         raise HTTPException(
@@ -100,6 +105,7 @@ def start_relay(stream_id: str, payload: schemas.RelayStartRequest):
         + [{"platform": platform, "status": "skipped_unknown_platform"} for platform in skipped],
         hls=payload.hls,
         restarted=restarted,
+        recording_file=handle.recording_file,
     )
 
 
@@ -115,6 +121,41 @@ def stop_relay(stream_id: str):
         status="offline",
         was_running=was_running,
     )
+
+
+@app.get(
+    "/recordings/{stream_id}",
+    response_model=list[schemas.RecordingFile],
+    dependencies=[Depends(require_token)],
+)
+def list_recordings(stream_id: str):
+    root = Path(get_settings().recordings_root) / stream_id
+    if not root.is_dir():
+        return []
+    recordings = []
+    for entry in sorted(root.iterdir(), reverse=True):
+        if entry.is_file():
+            stat = entry.stat()
+            recordings.append(
+                schemas.RecordingFile(
+                    filename=entry.name,
+                    size_bytes=stat.st_size,
+                    modified_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
+                )
+            )
+    return recordings
+
+
+@app.get(
+    "/recordings/{stream_id}/{filename}",
+    dependencies=[Depends(require_token)],
+)
+def download_recording(stream_id: str, filename: str):
+    root = (Path(get_settings().recordings_root) / stream_id).resolve()
+    target = (root / filename).resolve()
+    if target.parent != root or not target.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording not found")
+    return FileResponse(target, media_type="video/x-matroska", filename=filename)
 
 
 @app.get(

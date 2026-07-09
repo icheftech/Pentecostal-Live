@@ -9,6 +9,7 @@ import type {
   OrgMembership,
   PlatformKey,
   PlatformKeyCreate,
+  Recording,
   RegisterRequest,
   Stream,
   StreamActionResult,
@@ -124,5 +125,16 @@ export const api = {
   stopStream: (token: string, id: string) =>
     request<StreamActionResult>(`/streams/${id}/stop`, { method: "POST" }, token),
   changeScene: (token: string, id: string, scene: string) =>
-    request<Stream>(`/streams/${id}/scene`, { method: "POST", body: JSON.stringify({ scene }) }, token)
+    request<Stream>(`/streams/${id}/scene`, { method: "POST", body: JSON.stringify({ scene }) }, token),
+  recordings: (token: string, id: string) => request<Recording[]>(`/streams/${id}/recordings`, {}, token),
+  downloadRecording: async (token: string, id: string, filename: string): Promise<Blob> => {
+    const response = await fetch(
+      `${API_BASE_URL}/streams/${id}/recordings/${encodeURIComponent(filename)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!response.ok) {
+      throw new ApiError("Could not download the recording", response.status);
+    }
+    return response.blob();
+  }
 };

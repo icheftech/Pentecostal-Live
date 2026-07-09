@@ -140,3 +140,10 @@ export type StreamActionResult = Stream & {
   ingest_url?: string | null;
   warning?: string | null;
 };
+
+// Archived broadcast recording (served from the media-server via the API).
+export type Recording = {
+  filename: string;
+  size_bytes: number;
+  modified_at: string;
+};

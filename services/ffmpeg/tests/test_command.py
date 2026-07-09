@@ -156,3 +156,15 @@ def test_build_destination_url_joins_cleanly():
         build_destination_url("rtmp://a.rtmp.youtube.com/live2", "abcd-1234")
         == "rtmp://a.rtmp.youtube.com/live2/abcd-1234"
     )
+
+
+def test_record_path_adds_matroska_slave():
+    from pentecostal_ffmpeg import build_relay_command
+
+    argv = build_relay_command(
+        "rtmp://ingest/live/k",
+        [],
+        hls=None,
+        record_path="/var/rec/stream-1/20260101-101500.mkv",
+    )
+    assert "[f=matroska]/var/rec/stream-1/20260101-101500.mkv" in argv[-1]

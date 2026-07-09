@@ -93,6 +93,7 @@ def test_start_calls_media_server_with_decrypted_keys(org_with_stream, monkeypat
     assert call["headers"]["X-Media-Server-Token"]
     payload = call["json"]
     assert payload["hls"] is True
+    assert payload["record"] is True
     assert payload["ingest_url"] == body["ingest_url"]
     # RTMP URL resolution is the media-server's job (pentecostal_ffmpeg.platforms)
     assert payload["destinations"] == [

@@ -54,6 +54,11 @@ nginx-rtmp ingest (:1935, HLS on :8080), and the dashboard (:3000).
    and per-platform status.
 7. When the service ends: **Stop broadcast**, then **Stop** the stream.
 
+Every broadcast is **recorded automatically** on the server (crash-tolerant
+MKV, one file per Go live). Expand **Recordings** under a stream to download
+past services and classes; set `PENTECOSTAL_LIVE_RECORDING_ENABLED=false` on
+the media-server to turn archiving off.
+
 The website player can embed the HLS output at
 `http://<host>:8080/hls/<stream_id>/index.m3u8`.
 

@@ -23,6 +23,7 @@ import type {
   Organization,
   OrgMembership,
   PlatformKey,
+  Recording,
   Stream,
   StreamMetrics,
   UserContext
@@ -49,6 +50,7 @@ export default function DashboardPage() {
   const [busy, setBusy] = useState(false);
   const [liveMetrics, setLiveMetrics] = useState<StreamMetrics | null>(null);
   const [ingestInfo, setIngestInfo] = useState<{ streamId: string; url: string } | null>(null);
+  const [recordingsByStream, setRecordingsByStream] = useState<Record<string, Recording[]>>({});
 
   const liveStream = useMemo(() => streams.find((stream) => stream.status === "live"), [streams]);
   const liveStreamId = liveStream?.id ?? null;
@@ -387,6 +389,34 @@ export default function DashboardPage() {
     }
   }
 
+  async function loadRecordings(streamId: string) {
+    if (!token) return;
+    try {
+      const recordings = await api.recordings(token, streamId);
+      setRecordingsByStream((previous) => ({ ...previous, [streamId]: recordings }));
+    } catch {
+      setMessage("Could not load recordings.");
+    }
+  }
+
+  async function handleDownloadRecording(streamId: string, filename: string) {
+    if (!token) return;
+    setBusy(true);
+    try {
+      const blob = await api.downloadRecording(token, streamId, filename);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not download the recording");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateStream(action: () => Promise<Stream>) {
     setBusy(true);
     try {
@@ -635,6 +665,33 @@ export default function DashboardPage() {
                     </button>
                   ))}
                 </div>
+                <details
+                  className="recordings"
+                  onToggle={(event) => {
+                    if ((event.target as HTMLDetailsElement).open) void loadRecordings(stream.id);
+                  }}
+                >
+                  <summary>Recordings</summary>
+                  <div className="table-list">
+                    {(recordingsByStream[stream.id] ?? []).map((recording) => (
+                      <div className="row" key={recording.filename}>
+                        <div>
+                          <strong>{recording.filename}</strong>
+                          <span>{(recording.size_bytes / (1024 * 1024)).toFixed(1)} MB</span>
+                        </div>
+                        <button
+                          disabled={busy}
+                          onClick={() => void handleDownloadRecording(stream.id, recording.filename)}
+                        >
+                          Download
+                        </button>
+                      </div>
+                    ))}
+                    {(recordingsByStream[stream.id] ?? []).length === 0 && (
+                      <p className="empty">No recordings yet — every broadcast is archived automatically.</p>
+                    )}
+                  </div>
+                </details>
               </div>
             ))}
             {streams.length === 0 && <p className="empty">No streams scheduled.</p>}

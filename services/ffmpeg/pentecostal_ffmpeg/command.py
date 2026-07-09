@@ -62,6 +62,7 @@ def build_relay_command(
     destinations: Sequence[Destination],
     hls: HlsSettings | None = None,
     ffmpeg_binary: str = "ffmpeg",
+    record_path: str | None = None,
 ) -> list[str]:
     """Build the full FFmpeg argv for a fan-out relay.
 
@@ -71,16 +72,21 @@ def build_relay_command(
     - Emits machine-readable progress on stdout (``-progress pipe:1``) so the
       media-server can parse real bitrate / frame / drop counts.
 
+    record_path adds a local archive copy of the broadcast. Matroska is used
+    because it stays playable even if the process dies mid-write.
+
     Raises ValueError when there is nothing to output.
     """
     if not ingest_url:
         raise ValueError("ingest_url is required")
-    if not destinations and hls is None:
-        raise ValueError("at least one destination or an HLS output is required")
+    if not destinations and hls is None and record_path is None:
+        raise ValueError("at least one destination, HLS, or recording output is required")
 
     slaves = [_tee_slave_for_destination(destination) for destination in destinations]
     if hls is not None:
         slaves.append(_tee_slave_for_hls(hls))
+    if record_path:
+        slaves.append(f"[f=matroska]{_tee_escape(record_path)}")
 
     return [
         ffmpeg_binary,

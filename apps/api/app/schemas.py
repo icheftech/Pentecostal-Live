@@ -231,3 +231,9 @@ class StreamMetricsOut(BaseModel):
 # Rebuild forward refs after all models are defined
 LoginResponse.model_rebuild()
 OrgMembership.model_rebuild()
+
+
+class RecordingOut(BaseModel):
+    filename: str
+    size_bytes: int
+    modified_at: str

@@ -40,10 +40,12 @@ services:
       - ../../.env
     environment:
       PENTECOSTAL_LIVE_HLS_ROOT: /var/pentecostal-live/hls
+      PENTECOSTAL_LIVE_RECORDINGS_ROOT: /var/pentecostal-live/recordings
       PENTECOSTAL_LIVE_API_URL: http://api:8000
       PENTECOSTAL_LIVE_RTMP_PUBLISH_BASE_URL: rtmp://nginx-rtmp:1935/live
     volumes:
       - hls_data:/var/pentecostal-live/hls
+      - recordings_data:/var/pentecostal-live/recordings
     ports:
       - "8001:8001"
 
@@ -79,3 +81,4 @@ services:
 volumes:
   postgres_data:
   hls_data:
+  recordings_data:

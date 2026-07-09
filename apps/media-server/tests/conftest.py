@@ -8,6 +8,10 @@ os.environ.setdefault(
     "PENTECOSTAL_LIVE_HLS_ROOT",
     str(Path(__file__).resolve().parent / ".hls-test-output"),
 )
+os.environ.setdefault(
+    "PENTECOSTAL_LIVE_RECORDINGS_ROOT",
+    str(Path(__file__).resolve().parent / ".recordings-test-output"),
+)
 
 # Allow running pytest from apps/media-server without installing the packages.
 _REPO_ROOT = Path(__file__).resolve().parents[3]

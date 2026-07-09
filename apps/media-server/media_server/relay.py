@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pentecostal_ffmpeg import Destination, HlsSettings, build_relay_command
@@ -55,6 +56,7 @@ class RelayHandle:
     destinations: list[Destination]
     hls: bool
     started_at_monotonic: float
+    recording_file: str | None = None
     stats: dict = field(default_factory=dict)
     stats_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -63,9 +65,10 @@ class RelayHandle:
 
 
 class RelayManager:
-    def __init__(self, ffmpeg_binary: str, hls_root: str):
+    def __init__(self, ffmpeg_binary: str, hls_root: str, recordings_root: str = "./data/recordings"):
         self._ffmpeg_binary = ffmpeg_binary
         self._hls_root = Path(hls_root)
+        self._recordings_root = Path(recordings_root)
         self._relays: dict[str, RelayHandle] = {}
         self._lock = threading.Lock()
 
@@ -79,6 +82,7 @@ class RelayManager:
         ingest_url: str,
         destinations: list[Destination],
         hls: bool,
+        record: bool = False,
     ) -> tuple[RelayHandle, bool]:
         """Start (or idempotently restart) the relay for a stream.
 
@@ -93,11 +97,20 @@ class RelayManager:
             output_dir.mkdir(parents=True, exist_ok=True)
             hls_settings = HlsSettings(output_path=str(output_dir / "index.m3u8"))
 
+        recording_file: str | None = None
+        record_path: str | None = None
+        if record:
+            recording_dir = self._recordings_root / stream_id
+            recording_dir.mkdir(parents=True, exist_ok=True)
+            recording_file = datetime.now(UTC).strftime("%Y%m%d-%H%M%S") + ".mkv"
+            record_path = str(recording_dir / recording_file)
+
         argv = build_relay_command(
             ingest_url,
             destinations,
             hls=hls_settings,
             ffmpeg_binary=self._ffmpeg_binary,
+            record_path=record_path,
         )
         logger.info("starting relay for stream %s: %d destinations, hls=%s",
                     stream_id, len(destinations), hls)
@@ -114,6 +127,7 @@ class RelayManager:
             destinations=list(destinations),
             hls=hls,
             started_at_monotonic=time.monotonic(),
+            recording_file=recording_file,
         )
         with self._lock:
             self._relays[stream_id] = handle

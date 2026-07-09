@@ -103,6 +103,7 @@ def start_stream_relay(db: Session, stream: models.Stream) -> tuple[str, str | N
             "ingest_url": build_pull_url(stream.ingest_key),
             "destinations": destinations,
             "hls": True,
+            "record": True,
         },
     )
     return ingest_url, warning
@@ -111,3 +112,39 @@ def start_stream_relay(db: Session, stream: models.Stream) -> tuple[str, str | N
 def stop_stream_relay(stream: models.Stream) -> str | None:
     """Ask the media-server to stop relaying `stream`. Returns warning or None."""
     return _post(f"/relays/{stream.id}/stop")
+
+
+def list_recordings(stream_id: str) -> list[dict]:
+    """Fetch the archived recordings for a stream; empty list when unavailable."""
+    settings = get_settings()
+    url = f"{settings.media_server_url.rstrip('/')}/recordings/{stream_id}"
+    try:
+        response = httpx.get(url, headers=_headers(), timeout=REQUEST_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        body = response.json()
+        return body if isinstance(body, list) else []
+    except (httpx.HTTPError, ValueError):
+        logger.warning("could not list recordings for stream %s", stream_id)
+        return []
+
+
+def open_recording_download(stream_id: str, filename: str) -> tuple[httpx.Client, httpx.Response] | None:
+    """Open a streaming download of one recording; None when unavailable.
+
+    The caller owns closing both the response and the client (pass them to a
+    StreamingResponse background task).
+    """
+    settings = get_settings()
+    url = f"{settings.media_server_url.rstrip('/')}/recordings/{stream_id}/{filename}"
+    client = httpx.Client(timeout=None)
+    try:
+        request = client.build_request("GET", url, headers=_headers())
+        response = client.send(request, stream=True)
+    except httpx.HTTPError:
+        client.close()
+        return None
+    if response.status_code != 200:
+        response.close()
+        client.close()
+        return None
+    return client, response

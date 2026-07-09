@@ -2,8 +2,10 @@ import secrets
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app import models, schemas
 from app.audit import record_audit_event
@@ -195,4 +197,43 @@ async def get_metrics(
         dropped_frames=stats["dropped_frames"],
         health_status=stream_stats.derive_health(stats),
         destinations=stats["destinations"],
+    )
+
+
+# Any authenticated org member can browse recordings
+@router.get("/{stream_id}/recordings", response_model=list[schemas.RecordingOut])
+def list_stream_recordings(
+    stream_id: str,
+    context: CurrentContext = Depends(get_current_context),
+    db: Session = Depends(get_db),
+):
+    stream = get_stream_or_404(db, stream_id, context.organization.id)
+    return media_server.list_recordings(stream.id)
+
+
+# Any authenticated org member can download a recording (proxied from the media-server)
+@router.get("/{stream_id}/recordings/{filename}")
+def download_stream_recording(
+    stream_id: str,
+    filename: str,
+    context: CurrentContext = Depends(get_current_context),
+    db: Session = Depends(get_db),
+):
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording not found")
+    stream = get_stream_or_404(db, stream_id, context.organization.id)
+    opened = media_server.open_recording_download(stream.id, filename)
+    if opened is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recording not found")
+    client, upstream = opened
+
+    def close_upstream() -> None:
+        upstream.close()
+        client.close()
+
+    return StreamingResponse(
+        upstream.iter_bytes(),
+        media_type="video/x-matroska",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        background=BackgroundTask(close_upstream),
     )
