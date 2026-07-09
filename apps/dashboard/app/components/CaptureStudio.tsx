@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, CircleDot, Square } from "lucide-react";
+import { Camera, CircleDot, MonitorUp, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { captureSocketUrl } from "../lib/api";
 
@@ -31,6 +31,7 @@ function pickRecorderMimeType(): string | undefined {
  * third-party encoder required.
  */
 export default function CaptureStudio({ streamId, ingestKey, onStatus }: Props) {
+  const [sourceType, setSourceType] = useState<"camera" | "screen">("camera");
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDeviceId, setVideoDeviceId] = useState("");
@@ -71,26 +72,40 @@ export default function CaptureStudio({ streamId, ingestKey, onStatus }: Props) 
   // Tear everything down when the panel unmounts or the stream/key changes.
   useEffect(() => stopPreview, [stopPreview, streamId, ingestKey]);
 
-  async function startPreview() {
+  async function startPreview(nextSourceType: "camera" | "screen" = sourceType) {
     try {
-      const constraints: MediaStreamConstraints = {
-        video: videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true,
-        audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true
-      };
+      let stream: MediaStream;
+      if (nextSourceType === "screen") {
+        // Screen/slides source (lyrics, announcements) + the selected microphone.
+        const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        const mic = await navigator.mediaDevices.getUserMedia({
+          audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true
+        });
+        stream = new MediaStream([...display.getVideoTracks(), ...mic.getAudioTracks()]);
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true,
+          audio: audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true
+        });
+      }
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       mediaStreamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
+      setSourceType(nextSourceType);
       setPreviewing(true);
       // Labels are only populated after permission is granted.
       const devices = await navigator.mediaDevices.enumerateDevices();
       setVideoDevices(devices.filter((device) => device.kind === "videoinput"));
       setAudioDevices(devices.filter((device) => device.kind === "audioinput"));
-      onStatus("Camera preview ready.");
+      onStatus(nextSourceType === "screen" ? "Screen share preview ready." : "Camera preview ready.");
     } catch {
-      onStatus("Could not open the camera — check permissions and connections.");
+      onStatus(
+        nextSourceType === "screen"
+          ? "Could not share the screen — check permissions."
+          : "Could not open the camera — check permissions and connections."
+      );
     }
   }
 
@@ -145,7 +160,7 @@ export default function CaptureStudio({ streamId, ingestKey, onStatus }: Props) 
         {!previewing && (
           <div className="capture-placeholder">
             <Camera size={40} />
-            <span>Connect a webcam or an HDMI/SDI capture device, then open the camera.</span>
+            <span>Connect a webcam or an HDMI/SDI capture device and open the camera — or share a screen for slides and lyrics.</span>
           </div>
         )}
         {broadcasting && (
@@ -160,7 +175,7 @@ export default function CaptureStudio({ streamId, ingestKey, onStatus }: Props) 
           <select
             value={videoDeviceId}
             onChange={(event) => setVideoDeviceId(event.target.value)}
-            disabled={broadcasting}
+            disabled={broadcasting || sourceType === "screen"}
             aria-label="Video source"
           >
             <option value="">Default camera</option>
@@ -188,13 +203,25 @@ export default function CaptureStudio({ streamId, ingestKey, onStatus }: Props) 
 
       <div className="button-row">
         {!previewing ? (
-          <button className="primary" onClick={() => void startPreview()}>
-            <Camera size={18} /> Open camera
-          </button>
+          <>
+            <button className="primary" onClick={() => void startPreview("camera")}>
+              <Camera size={18} /> Open camera
+            </button>
+            <button onClick={() => void startPreview("screen")}>
+              <MonitorUp size={18} /> Share screen
+            </button>
+          </>
         ) : (
           <>
-            <button onClick={() => void startPreview()} disabled={broadcasting}>
+            <button onClick={() => void startPreview(sourceType)} disabled={broadcasting}>
               Apply source
+            </button>
+            <button
+              onClick={() => void startPreview(sourceType === "camera" ? "screen" : "camera")}
+              disabled={broadcasting}
+            >
+              {sourceType === "camera" ? <MonitorUp size={18} /> : <Camera size={18} />}
+              {sourceType === "camera" ? "Switch to screen" : "Switch to camera"}
             </button>
             {!broadcasting ? (
               <button className="primary" onClick={startBroadcast}>
