@@ -49,13 +49,13 @@ def health():
 )
 def start_relay(stream_id: str, payload: schemas.RelayStartRequest):
     destinations: list[Destination] = []
+    skipped: list[str] = []
     for item in payload.destinations:
         rtmp_url = item.rtmp_url or resolve_rtmp_url(item.platform)
         if not rtmp_url:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Unknown platform '{item.platform}' and no rtmp_url provided",
-            )
+            # One unknown platform must never block the whole broadcast.
+            skipped.append(item.platform)
+            continue
         destinations.append(
             Destination(
                 platform=item.platform,
@@ -66,7 +66,7 @@ def start_relay(stream_id: str, payload: schemas.RelayStartRequest):
     if not destinations and not payload.hls:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Relay needs at least one destination or hls=true",
+            detail="Relay needs at least one resolvable destination or hls=true",
         )
 
     try:
@@ -88,7 +88,8 @@ def start_relay(stream_id: str, payload: schemas.RelayStartRequest):
         destinations=[
             {"platform": destination.platform, "status": "connected"}
             for destination in handle.destinations
-        ],
+        ]
+        + [{"platform": platform, "status": "skipped_unknown_platform"} for platform in skipped],
         hls=payload.hls,
         restarted=restarted,
     )

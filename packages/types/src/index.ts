@@ -116,3 +116,21 @@ export type StreamCreate = {
   title: string;
   source: string;
 };
+
+export type StreamDestinationStatus = {
+  platform: string;
+  status: string;
+};
+
+// Frame pushed by the metrics WebSocket (apps/api/app/routers/ws.py).
+export type StreamMetrics = {
+  type: "metrics";
+  stream_id: string;
+  status: "live" | "offline";
+  bitrate_kbps: number;
+  uptime_seconds: number;
+  dropped_frames: number;
+  viewer_count?: number;
+  health_status: string;
+  destinations: StreamDestinationStatus[];
+};

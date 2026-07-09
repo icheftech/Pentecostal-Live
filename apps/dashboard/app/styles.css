@@ -472,3 +472,29 @@ h2 {
   }
 }
 
+
+.monitor-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.monitor-stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  align-items: center;
+}
+
+.monitor-stats span {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.monitor-destinations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: center;
+}

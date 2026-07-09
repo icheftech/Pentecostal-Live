@@ -1,8 +1,9 @@
 """Standard RTMP base URLs per streaming platform.
 
-Source of truth mirrors packages/config/src/index.ts (supportedPlatforms).
-If a platform is added there, add it here too (and in
-apps/api/app/services/media_server.py which keeps a mirror for the API side).
+This module is the single runtime source of truth for platform RTMP URLs.
+The main API sends only platform + stream key; the media-server resolves the
+URL here. packages/config/src/index.ts lists the same platforms for dashboard
+display purposes only — when adding a platform, update both.
 """
 
 PLATFORM_RTMP_URLS: dict[str, str] = {

@@ -94,10 +94,10 @@ def test_start_calls_media_server_with_decrypted_keys(org_with_stream, monkeypat
     payload = call["json"]
     assert payload["hls"] is True
     assert payload["ingest_url"] == body["ingest_url"]
+    # RTMP URL resolution is the media-server's job (pentecostal_ffmpeg.platforms)
     assert payload["destinations"] == [
         {
             "platform": "youtube",
-            "rtmp_url": "rtmp://a.rtmp.youtube.com/live2",
             "stream_key": "yt-secret-key-1234",
         }
     ]

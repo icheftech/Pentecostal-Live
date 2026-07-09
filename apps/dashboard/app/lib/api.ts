@@ -18,6 +18,12 @@ import type {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/v1";
 
+// WebSocket endpoint for live stream metrics (see apps/api/app/routers/ws.py).
+export function streamMetricsSocketUrl(streamId: string, token: string): string {
+  const wsBase = API_BASE_URL.replace(/^http/, "ws");
+  return `${wsBase}/ws/streams/${streamId}?token=${encodeURIComponent(token)}`;
+}
+
 export class ApiError extends Error {
   status: number;
 

@@ -14,7 +14,7 @@ import {
   Video
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { api, ApiError } from "./lib/api";
+import { api, ApiError, streamMetricsSocketUrl } from "./lib/api";
 import type {
   Member,
   MemberInviteResponse,
@@ -22,6 +22,7 @@ import type {
   OrgMembership,
   PlatformKey,
   Stream,
+  StreamMetrics,
   UserContext
 } from "@pentecostal-live/types";
 
@@ -44,8 +45,35 @@ export default function DashboardPage() {
   const [inviteResult, setInviteResult] = useState<MemberInviteResponse | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [liveMetrics, setLiveMetrics] = useState<StreamMetrics | null>(null);
 
   const liveStream = useMemo(() => streams.find((stream) => stream.status === "live"), [streams]);
+  const liveStreamId = liveStream?.id ?? null;
+
+  // Live metrics over the authenticated WebSocket while a stream is live.
+  useEffect(() => {
+    if (!token || !liveStreamId) {
+      setLiveMetrics(null);
+      return;
+    }
+    const socket = new WebSocket(streamMetricsSocketUrl(liveStreamId, token));
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(String(event.data)) as StreamMetrics;
+        if (payload.type === "metrics") {
+          setLiveMetrics(payload);
+        }
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    socket.onclose = () => setLiveMetrics(null);
+    return () => {
+      socket.onclose = null;
+      socket.close();
+      setLiveMetrics(null);
+    };
+  }, [token, liveStreamId]);
   const canManageMembers = me?.role === "owner" || me?.role === "admin";
   const assignableRoles = useMemo(
     () => (me?.role === "owner" ? ["owner", "admin", "producer", "viewer"] : ["admin", "producer", "viewer"]),
@@ -666,7 +694,43 @@ export default function DashboardPage() {
           <div className="monitor">
             <Radio size={52} />
             <strong>{liveStream?.title ?? "No active broadcast"}</strong>
-            <span>{liveStream ? "RTMP/HLS handoff ready for media server integration." : "Start a stream to arm metrics."}</span>
+            {liveStream && liveMetrics ? (
+              <>
+                <span className={`pill ${liveMetrics.health_status === "excellent" ? "live" : ""}`}>
+                  {liveMetrics.health_status}
+                </span>
+                <div className="monitor-stats">
+                  <div>
+                    <span>Bitrate</span>
+                    <strong>{liveMetrics.bitrate_kbps} kbps</strong>
+                  </div>
+                  <div>
+                    <span>Uptime</span>
+                    <strong>
+                      {Math.floor(liveMetrics.uptime_seconds / 60)}m {liveMetrics.uptime_seconds % 60}s
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Dropped</span>
+                    <strong>{liveMetrics.dropped_frames}</strong>
+                  </div>
+                </div>
+                {liveMetrics.destinations.length > 0 && (
+                  <div className="monitor-destinations">
+                    {liveMetrics.destinations.map((destination) => (
+                      <span
+                        key={destination.platform}
+                        className={destination.status === "connected" ? "pill live" : "pill"}
+                      >
+                        {destination.platform}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <span>{liveStream ? "Connecting to live metrics…" : "Start a stream to arm metrics."}</span>
+            )}
           </div>
           <button className="secondary" onClick={() => refresh()} disabled={busy}>
             <RotateCw size={18} />

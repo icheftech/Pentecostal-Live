@@ -140,13 +140,34 @@ def test_start_resolves_rtmp_url_from_platform_when_omitted():
     assert "rtmp://a.rtmp.youtube.com/live2/yt-key" in FakePopen.instances[0].argv[-1]
 
 
-def test_start_unknown_platform_without_url_is_422():
+def test_start_unknown_platform_is_skipped_not_fatal():
     response = client.post(
         "/relays/stream-3/start",
         headers=AUTH,
         json={
             "ingest_url": "rtmp://localhost:1935/live/k",
+            "destinations": [
+                {"platform": "twitch", "stream_key": "tw-key"},
+                {"platform": "youtube", "stream_key": "yt-key"},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    statuses = {d["platform"]: d["status"] for d in response.json()["destinations"]}
+    assert statuses == {"youtube": "connected", "twitch": "skipped_unknown_platform"}
+    # only the resolvable destination reaches ffmpeg
+    tee = FakePopen.instances[0].argv[-1]
+    assert "yt-key" in tee and "tw-key" not in tee
+
+
+def test_start_all_unknown_and_no_hls_is_422():
+    response = client.post(
+        "/relays/stream-3b/start",
+        headers=AUTH,
+        json={
+            "ingest_url": "rtmp://localhost:1935/live/k",
             "destinations": [{"platform": "twitch", "stream_key": "tw-key"}],
+            "hls": False,
         },
     )
     assert response.status_code == 422
