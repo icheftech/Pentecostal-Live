@@ -109,9 +109,13 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
   const recorderRef = useRef<MediaRecorder | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
-  sourcesRef.current = sources;
-  layoutsRef.current = layouts;
-  activeSceneRef.current = activeScene;
+  const sourceSequenceRef = useRef(0);
+
+  useEffect(() => {
+    sourcesRef.current = sources;
+    layoutsRef.current = layouts;
+    activeSceneRef.current = activeScene;
+  }, [sources, layouts, activeScene]);
 
   const layoutStorageKey = `pentecostal_live_layouts_${orgSlug}`;
 
@@ -242,8 +246,9 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
       await ensureAudio();
       await refreshDeviceLists();
       const track = stream.getVideoTracks()[0];
+      sourceSequenceRef.current += 1;
       const source: StudioSource = {
-        id: `camera-${Date.now()}`,
+        id: `camera-${sourceSequenceRef.current}`,
         kind: "camera",
         label: track?.label || `Camera ${sourcesRef.current.length + 1}`,
         stream,
@@ -260,8 +265,9 @@ export default function Studio({ streamId, ingestKey, activeScene, orgSlug, onSt
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
       await ensureAudio();
+      sourceSequenceRef.current += 1;
       const source: StudioSource = {
-        id: `screen-${Date.now()}`,
+        id: `screen-${sourceSequenceRef.current}`,
         kind: "screen",
         label: "Screen / slides",
         stream,
