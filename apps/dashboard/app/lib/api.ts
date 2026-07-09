@@ -18,6 +18,16 @@ import type {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/v1";
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
@@ -30,7 +40,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(body.detail ?? "Request failed");
+    throw new ApiError(body.detail ?? "Request failed", response.status);
   }
 
   if (response.status === 204) {
@@ -47,6 +57,16 @@ export const api = {
     request<TokenResponse>("/auth/register", { method: "POST", body: JSON.stringify(payload) }),
   acceptInvite: (payload: AcceptInviteRequest) =>
     request<TokenResponse>("/auth/accept-invite", { method: "POST", body: JSON.stringify(payload) }),
+  refreshToken: (refreshToken: string) =>
+    request<TokenResponse>("/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: refreshToken })
+    }),
+  logout: (refreshToken: string) =>
+    request<void>("/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: refreshToken })
+    }),
   me: (token: string) => request<UserContext>("/auth/me", {}, token),
   myOrgs: (token: string) => request<OrgMembership[]>("/auth/orgs", {}, token),
   switchOrg: (token: string, orgSlug: string) =>

@@ -268,9 +268,11 @@ def switch_org(
         actor_user_id=context.user.id,
         details={"from_org": context.organization.slug, "to_org": org.slug},
     )
+    refresh_token = issue_refresh_token(db, context.user.id, org.id)
     db.commit()
     return schemas.LoginResponse(
         access_token=create_access_token(context.user.id, org.id),
+        refresh_token=refresh_token,
         organization=schemas.OrganizationOut.model_validate(org),
         role=role.name,
     )

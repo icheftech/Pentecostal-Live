@@ -14,7 +14,7 @@ import {
   Video
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "./lib/api";
+import { api, ApiError } from "./lib/api";
 import type {
   Member,
   MemberInviteResponse,
@@ -26,6 +26,7 @@ import type {
 } from "@pentecostal-live/types";
 
 const tokenStorageKey = "pentecostal_live_token";
+const refreshTokenStorageKey = "pentecostal_live_refresh_token";
 const defaultScenes = ["main", "sermon", "worship", "altar"];
 
 export default function DashboardPage() {
@@ -60,8 +61,7 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const refresh = useCallback(async (currentToken = token) => {
-    if (!currentToken) return;
+  const loadAll = useCallback(async (currentToken: string) => {
     const [userContext, org, keys, streamList, memberList, orgList] = await Promise.all([
       api.me(currentToken),
       api.organization(currentToken),
@@ -76,15 +76,55 @@ export default function DashboardPage() {
     setStreams(streamList);
     setMembers(memberList);
     setMyOrgs(orgList);
-  }, [token]);
+  }, []);
+
+  // Trade the stored refresh token for a new access/refresh pair.
+  // Returns the new access token, or null if the session can't be renewed.
+  const renewSession = useCallback(async (): Promise<string | null> => {
+    const storedRefreshToken = window.localStorage.getItem(refreshTokenStorageKey);
+    if (!storedRefreshToken) return null;
+    try {
+      const pair = await api.refreshToken(storedRefreshToken);
+      window.localStorage.setItem(tokenStorageKey, pair.access_token);
+      if (pair.refresh_token) {
+        window.localStorage.setItem(refreshTokenStorageKey, pair.refresh_token);
+      }
+      setToken(pair.access_token);
+      return pair.access_token;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const refresh = useCallback(async (currentToken = token) => {
+    if (!currentToken) return;
+    try {
+      await loadAll(currentToken);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        const renewedToken = await renewSession();
+        if (renewedToken) {
+          await loadAll(renewedToken);
+          return;
+        }
+        signOut();
+        setMessage("Session expired — please sign in again.");
+        return;
+      }
+      throw error;
+    }
+  }, [token, loadAll, renewSession]);
 
   useEffect(() => {
     if (!token) return;
     void refresh(token);
   }, [refresh, token]);
 
-  function adoptToken(accessToken: string) {
+  function adoptToken(accessToken: string, refreshToken?: string | null) {
     window.localStorage.setItem(tokenStorageKey, accessToken);
+    if (refreshToken) {
+      window.localStorage.setItem(refreshTokenStorageKey, refreshToken);
+    }
     setToken(accessToken);
     setOrgChoices(null);
     setPendingLogin(null);
@@ -111,7 +151,7 @@ export default function DashboardPage() {
           setMessage("Login failed.");
           return;
         }
-        adoptToken(response.access_token);
+        adoptToken(response.access_token, response.refresh_token);
       } else if (mode === "register") {
         const response = await api.register({
           organization_name: String(data.get("organizationName")),
@@ -120,7 +160,7 @@ export default function DashboardPage() {
           password: String(data.get("password")),
           full_name: String(data.get("fullName") || "")
         });
-        adoptToken(response.access_token);
+        adoptToken(response.access_token, response.refresh_token);
       } else {
         const response = await api.acceptInvite({
           token: inviteToken,
@@ -128,7 +168,7 @@ export default function DashboardPage() {
           full_name: String(data.get("fullName") || "")
         });
         window.history.replaceState(null, "", window.location.pathname);
-        adoptToken(response.access_token);
+        adoptToken(response.access_token, response.refresh_token);
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Authentication failed");
@@ -147,7 +187,7 @@ export default function DashboardPage() {
         setMessage("Login failed.");
         return;
       }
-      adoptToken(response.access_token);
+      adoptToken(response.access_token, response.refresh_token);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Authentication failed");
     } finally {
@@ -167,6 +207,9 @@ export default function DashboardPage() {
       }
       setInviteResult(null);
       window.localStorage.setItem(tokenStorageKey, response.access_token);
+      if (response.refresh_token) {
+        window.localStorage.setItem(refreshTokenStorageKey, response.refresh_token);
+      }
       setToken(response.access_token);
       setMessage(`Switched to ${response.organization?.name ?? orgSlug}.`);
     } catch (error) {
@@ -291,6 +334,12 @@ export default function DashboardPage() {
   }
 
   function signOut() {
+    const storedRefreshToken = window.localStorage.getItem(refreshTokenStorageKey);
+    if (storedRefreshToken) {
+      // Best-effort server-side revocation; local sign-out proceeds regardless.
+      void api.logout(storedRefreshToken).catch(() => undefined);
+    }
+    window.localStorage.removeItem(refreshTokenStorageKey);
     window.localStorage.removeItem(tokenStorageKey);
     setToken(null);
     setMe(null);

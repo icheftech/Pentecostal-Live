@@ -5,7 +5,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.core.config import get_settings
 from app.core.limiter import limiter
-from app.routers import auth, members, organizations, platform_keys, streams, tokens, ws
+from app.routers import auth, ingest, members, organizations, platform_keys, streams, tokens, ws
 
 
 settings = get_settings()
@@ -34,6 +34,7 @@ app.include_router(tokens.router, prefix="/v1")
 app.include_router(organizations.router, prefix="/v1")
 app.include_router(platform_keys.router, prefix="/v1")
 app.include_router(streams.router, prefix="/v1")
+app.include_router(ingest.router, prefix="/v1")
 app.include_router(ws.router, prefix="/v1")
 
 

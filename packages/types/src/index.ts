@@ -1,6 +1,7 @@
 export type TokenResponse = {
   access_token: string;
   token_type: "bearer";
+  refresh_token?: string | null;
 };
 
 export type RegisterRequest = {
@@ -43,6 +44,7 @@ export type OrgMembership = {
 export type LoginResponse = {
   access_token: string | null;
   token_type: "bearer";
+  refresh_token?: string | null;
   organization?: Organization | null;
   role?: string | null;
   requires_org_selection: boolean;
