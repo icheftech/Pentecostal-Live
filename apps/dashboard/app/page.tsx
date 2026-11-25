@@ -31,6 +31,8 @@ import type {
 
 const tokenStorageKey = "pentecostal_live_token";
 const refreshTokenStorageKey = "pentecostal_live_refresh_token";
+import SundayControl from "./rehearsal/SundayControl";
+
 const defaultScenes = ["main", "sermon", "worship", "altar"];
 
 export default function DashboardPage() {
@@ -50,6 +52,7 @@ export default function DashboardPage() {
   const [busy, setBusy] = useState(false);
   const [liveMetrics, setLiveMetrics] = useState<StreamMetrics | null>(null);
   const [ingestInfo, setIngestInfo] = useState<{ streamId: string; url: string } | null>(null);
+  const [showSundayControl, setShowSundayControl] = useState(false);
   const [recordingsByStream, setRecordingsByStream] = useState<Record<string, Recording[]>>({});
 
   const liveStream = useMemo(() => streams.find((stream) => stream.status === "live"), [streams]);
@@ -587,6 +590,15 @@ export default function DashboardPage() {
           </button>
         </div>
       </header>
+
+      {canManageMembers && (
+        <section className="panel">
+          <button type="button" aria-expanded={showSundayControl} onClick={() => setShowSundayControl(value => !value)}>
+            {showSundayControl ? "Close Sunday Control Room" : "Open Sunday Control Room"}
+          </button>
+          {showSundayControl && <SundayControl key={organization?.id} organizationName={organization?.name ?? "PMBC"} serviceTitle={liveStream?.title} />}
+        </section>
+      )}
 
       <section className="metrics-strip">
         <div>
