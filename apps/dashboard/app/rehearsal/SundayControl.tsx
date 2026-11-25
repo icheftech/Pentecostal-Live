@@ -87,7 +87,8 @@ export default function SundayControl({organizationName, serviceTitle, simulatio
   async function take(action:{type:"take"|"offer"}){
     if(taking.current||state.ended||(mode==="obs"&&!connected))return;
     const candidate=reduce(state,action);
-    if(candidate===state)return;
+    // OBS can change outside the dashboard, even when the local cue has not changed.
+    if(candidate===state&&mode==="sim")return;
     taking.current=true;setBusy(true);
     try {
       if(mode==="obs"){

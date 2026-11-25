@@ -17,6 +17,7 @@ This is an owner/admin screen in the regular Pentecostal Live dashboard. It is n
 
 - Put a static PMBC giving card under a nonlooping media source in the Offering scene. Enable restart when active and hide the source when playback ends. Use a sample video for the first test. Keep the sanctuary input out of Offering, including any audio embedded in the switcher feed and any global OBS audio devices.
 - Make a local OBS recording while someone speaks into the sanctuary mic. Check the encoded recording through the cut into Offering, the clip ending, the missing-clip fallback, and the manual Take Live back to Sanctuary. No sanctuary speech should be heard during Offering. Keep this separate from the in-room sound system.
+- While still connected, take Offering in the dashboard, then switch Program back to Sanctuary directly in OBS. Once the dashboard shows Sanctuary, press **Offering Break** again. It should return to Offering. Press it again while Offering is already on Program and verify the clip does not restart.
 - Disconnect the dashboard or WebSocket and check that OBS continues to work directly. Confirm the resulting recording plays. Only mark the booth checked after running this with its real inputs.
 
 ## Current limits

@@ -85,7 +85,9 @@ export class LocalObs {
 
   async take(name:string){
     if(!rehearsalScene(name)) throw new Error("No rehearsal scene mapped for that cue.");
+    const current=await this.request("GetCurrentProgramScene");
     await this.assertRehearsal();
+    if(confirmedScene(name,current)) return name; // Leave an active clip playing.
     await this.request("SetCurrentProgramScene",{sceneName:name});
     if(!confirmedScene(name,await this.request("GetCurrentProgramScene"))) throw new Error("OBS did not confirm the selected scene.");
     return name;

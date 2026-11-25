@@ -57,6 +57,18 @@ const assert = require("node:assert/strict");
   await page.getByText("Scene controls are blocked while OBS is streaming.").waitFor();
   assert.equal(writes.length,2);
   streaming=false;
+  const offeringButton=page.getByRole("button",{name:"Offering Break",exact:true});
+  const program=page.getByRole("region",{name:"Program",exact:true});
+  await offeringButton.click();
+  await page.getByText("OBS confirmed the program scene.").waitFor();
+  assert.equal(writes.length,2,"An already-active Offering scene must not be restarted");
+  // Mimic the booth operator taking over directly in OBS, without changing the app's service cue.
+  scene="PL Rehearsal – Sanctuary";
+  socket.send(JSON.stringify({op:5,d:{eventType:"CurrentProgramSceneChanged",eventIntent:4,eventData:{sceneName:scene}}}));
+  await program.getByText("PL Rehearsal – Sanctuary",{exact:false}).waitFor();
+  await offeringButton.click();
+  await program.getByText("PL Rehearsal – Offering",{exact:false}).waitFor({timeout:2500});
+  assert.equal(writes.length,3,"Offering must cut again after a manual return in OBS");
   await page.getByRole("button",{name:"Take Live",exact:true}).click();
   await page.getByRole("region",{name:"Program",exact:true}).getByText("PL Rehearsal – Sanctuary",{exact:false}).waitFor();
   assert.equal(scene,"PL Rehearsal – Sanctuary");
@@ -67,6 +79,6 @@ const assert = require("node:assert/strict");
   await page.getByText("OBS Offline",{exact:true}).waitFor();
   assert.equal(await page.getByRole("button",{name:"Take Live",exact:true}).isDisabled(),true);
   assert.deepEqual(errors,[]);
-  console.log("PASS: authenticated dashboard, camera tiles, OBS handshake, Hold past zero, Take Live, Offering, live-output guard, End confirmation, disconnect.");
+  console.log("PASS: authenticated dashboard, camera tiles, OBS handshake, Hold past zero, Take Live, Offering with manual OBS recovery, live-output guard, End confirmation, disconnect.");
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
